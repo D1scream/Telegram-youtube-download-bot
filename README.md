@@ -1,10 +1,10 @@
 # Telegram Bot
 
+[Русский](README.ru.md)
+
 Telegram bot with features: music search and download via Soulseek ([slskd](https://github.com/slskd/slskd)), local library and user uploads, image analysis with Criminal Code of the Russian Federation (УК РФ) article lookup via OpenSearch and an LLM, and an HTTP endpoint for sending messages.
 
 Features are enabled by configuration. Only `BOT_TOKEN` is required.
-
-[Русский](README.ru.md)
 
 ## Features
 
