@@ -1,0 +1,11 @@
+.git
+.env
+docker/slskd/.env
+docker/slskd/data
+docker/opensearch
+.temp
+tmp_*
+*.json
+bot-linux
+coverage.out
+**/.cache

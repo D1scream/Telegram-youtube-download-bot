@@ -1,0 +1,44 @@
+services:
+  bot:
+    build: .
+    container_name: tgbot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SLSKD_URL: http://slskd:5030
+      SLSKD_WEBHOOK_CALLBACK_URL: http://bot:9000/webhooks/slskd
+      SLSKD_DOWNLOADS_DIR: /app/docker/slskd/data/downloads
+      SLSKD_MUSIC_DIR: /app/music
+      UPLOADED_MUSIC_DIR: /app/uploaded_music
+    ports:
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - slskd_data:/app/docker/slskd/data
+      - ./music:/app/music:ro
+      - ./uploaded_music:/app/uploaded_music
+    depends_on:
+      slskd:
+        condition: service_started
+
+  slskd:
+    image: slskd/slskd:latest
+    container_name: tgbot-slskd
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SLSKD_NO_AUTH: "true"
+      SLSKD_REMOTE_CONFIGURATION: "true"
+      SLSKD_SHARED_DIR: /music;/uploaded_music
+      SLSKD_SLSK_DESCRIPTION: ""
+      SLSKD_SLSK_USERNAME: ${SLSKD_SLSK_USERNAME}
+      SLSKD_SLSK_PASSWORD: ${SLSKD_SLSK_PASSWORD}
+    ports:
+      - "5030:5030"
+      - "50300:50300"
+    volumes:
+      - slskd_data:/app
+      - ./music:/music:ro
+      - ./uploaded_music:/uploaded_music:ro
+
+volumes:
+  slskd_data:

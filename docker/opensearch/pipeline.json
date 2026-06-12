@@ -1,0 +1,18 @@
+{
+  "description": "Hybrid search normalization for uk_rf",
+  "phase_results_processors": [
+    {
+      "normalization-processor": {
+        "normalization": {
+          "technique": "min_max"
+        },
+        "combination": {
+          "technique": "arithmetic_mean",
+          "parameters": {
+            "weights": [0.3, 0.7]
+          }
+        }
+      }
+    }
+  ]
+}
