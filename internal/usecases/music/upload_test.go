@@ -9,11 +9,10 @@ import (
 
 	"github.com/go-telegram/bot/models"
 
-	"telegram-bot/internal/entities"
 )
 
 func TestAllowedExtension(t *testing.T) {
-	formats := []entities.AudioFormat{entities.AudioFormatMP3, entities.AudioFormatFLAC}
+	formats := []string{".mp3", ".flac"}
 	if _, err := allowedExtension("song.flac", formats); err != nil {
 		t.Fatalf("expected flac to be allowed: %v", err)
 	}

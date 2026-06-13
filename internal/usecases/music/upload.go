@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	"github.com/go-telegram/bot/models"
-
-	"telegram-bot/internal/entities"
 )
 
 const telegramBotMaxFileBytes = 20 << 20 // лимит Bot API на скачивание файла
@@ -27,7 +25,7 @@ type UploadMusicService struct {
 	fetcher        FileFetcher
 	messenger      Messenger
 	uploadDir      string
-	allowedFormats []entities.AudioFormat
+	allowedFormats []string
 	registry       *userFileRegistry
 	logger         *slog.Logger
 }
@@ -36,7 +34,7 @@ func NewUploadMusicService(
 	fetcher FileFetcher,
 	messenger Messenger,
 	uploadDir string,
-	allowedFormats []entities.AudioFormat,
+	allowedFormats []string,
 	logger *slog.Logger,
 ) *UploadMusicService {
 	uploadDir = strings.TrimSpace(uploadDir)
@@ -234,6 +232,8 @@ func audioFilename(audio *models.Audio) string {
 			name += ".ogg"
 		} else if strings.Contains(mime, "flac") {
 			name += ".flac"
+		} else if strings.Contains(mime, "webm") {
+			name += ".webm"
 		} else {
 			name += ".mp3"
 		}
@@ -241,23 +241,23 @@ func audioFilename(audio *models.Audio) string {
 	return name
 }
 
-func allowedExtension(filename string, formats []entities.AudioFormat) (string, error) {
+func allowedExtension(filename string, formats []string) (string, error) {
 	ext := strings.ToLower(filepath.Ext(filepath.Base(filename)))
 	if ext == "" {
 		return "", fmt.Errorf("нет расширения")
 	}
 	for _, format := range formats {
-		if ext == string(format) {
+		if ext == format {
 			return ext, nil
 		}
 	}
 	return "", fmt.Errorf("формат %s не разрешён", ext)
 }
 
-func formatList(formats []entities.AudioFormat) string {
+func formatList(formats []string) string {
 	parts := make([]string, len(formats))
 	for i, format := range formats {
-		parts[i] = strings.TrimPrefix(string(format), ".")
+		parts[i] = strings.TrimPrefix(format, ".")
 	}
 	return strings.Join(parts, ", ")
 }

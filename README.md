@@ -2,7 +2,7 @@
 
 [Русский](README.ru.md)
 
-Telegram bot with features: music search and download via Soulseek ([slskd](https://github.com/slskd/slskd)), local library and user uploads, image analysis with Criminal Code of the Russian Federation (УК РФ) article lookup via OpenSearch and an LLM, and an HTTP endpoint for sending messages.
+Telegram bot with features: music search and download via Soulseek ([slskd](https://github.com/slskd/slskd)), local library and user uploads, image analysis with Criminal Code of the Russian Federation (УК РФ) article lookup via OpenSearch and an LLM.
 
 Features are enabled by configuration. Only `BOT_TOKEN` is required.
 
@@ -11,12 +11,9 @@ Features are enabled by configuration. Only `BOT_TOKEN` is required.
 - **Search** (`/find <query>`): Soulseek search + local files `[C]`
 - **Download** (`/downloadN`): download a track from search results, clean up session messages
 - **Upload** (`/upload` + audio file): save to `uploaded_music/`, available in `/find`
-- **My files** (`/mymusic`, `/mymusic 2`): list user files (uploaded and cached), 10 per page
+- **My files** (`/mymusic`, `/mymusic 2`): list user files (uploaded and cached)
 - **Delete** (`/deleteN`): delete a file by number from `/mymusic`
 - **Image analysis** (photo): describe the image with an LLM, search matching УК РФ articles in OpenSearch, reply with results
-- **HTTP API** (`POST /send`): send a text message to a chat by ID
-- **slskd webhook** (`POST /webhooks/slskd`): download completion events
-- Peer ban on failed downloads (7-day expiry; todo: add env variable) with blacklist sync to slskd
 
 ## Technologies
 
@@ -33,13 +30,10 @@ Features are enabled by configuration. Only `BOT_TOKEN` is required.
 │   ├── adapters/               # Telegram, slskd, OpenSearch, LLM
 │   ├── config/                 # Configuration loading
 │   ├── entities/               # Domain entities
-│   ├── server/                 # HTTP router
 │   ├── transport/
-│   │   ├── http/               # REST handlers (/send, /webhooks/slskd)
 │   │   └── telegram/           # Telegram command handler
 │   └── usecases/
 │       ├── imageuk/            # Photo analysis and article search
-│       ├── messaging/          # Send message use case
 │       └── music/              # Search, upload, mymusic, local search
 ├── docker/
 │   ├── opensearch/             # OpenSearch stack for image analysis
@@ -68,7 +62,6 @@ Features are enabled by configuration. Only `BOT_TOKEN` is required.
    BOT_TOKEN=123456789:your-token
    SLSKD_SLSK_USERNAME=your_username
    SLSKD_SLSK_PASSWORD=your_password
-   SLSKD_WEBHOOK_SECRET=your-webhook-secret
    ```
 3. **Image analysis** (optional) — `OPENSEARCH_URL`, `LLM_API`.
 
@@ -85,17 +78,14 @@ docker compose up -d --build
 Bot variables go in `.env`.
 
 - `BOT_TOKEN` (required) — Telegram bot token from BotFather
-- `PORT` — HTTP server port, default `9000`
 
 **Music** (`SLSKD_URL` enables search, download, uploads, `/mymusic`):
 
 - `SLSKD_URL` — slskd base URL
 - `SLSKD_API_KEY` — slskd API key, if auth is enabled
-- `SLSKD_WEBHOOK_SECRET` — shared secret for `X-Webhook-Secret` header
-- `SLSKD_WEBHOOK_CALLBACK_URL` — webhook URL registered in slskd, default `http://host.docker.internal:9000/webhooks/slskd`
 - `SLSKD_SEARCH_FILE_LIMIT` — max files per search, local + slskd, default `50`
 - `SLSKD_SEARCH_DISPLAY_LIMIT` — max tracks in `/find` reply, default `10`
-- `SLSKD_ALLOWED_FORMATS` — allowed formats, default `mp3,flac,ogg,wav,m4a,aac`
+- `SLSKD_ALLOWED_FORMATS` — allowed formats, default `mp3,flac,ogg,wav,m4a,aac,webm`
 - `SLSKD_DOWNLOADS_DIR` — slskd download cache, default `docker/slskd/data/downloads`
 - `SLSKD_MUSIC_DIR` — local library, default `music`
 - `UPLOADED_MUSIC_DIR` — user uploads, default `uploaded_music`
@@ -114,7 +104,6 @@ Bot variables go in `.env`.
 **Soulseek** (same `.env`, used by the slskd container):
 
 - `SLSKD_SLSK_USERNAME`, `SLSKD_SLSK_PASSWORD` — Soulseek account
-- `SLSKD_WEBHOOK_SECRET` — webhook secret (same as the bot)
 
 ## Telegram Commands
 
@@ -131,16 +120,9 @@ Bot variables go in `.env`.
 - **Peer ban expiry**: failed download bans are lifted after 7 days
 - Session TTL for `/find` and `/mymusic`: 30 minutes
 
-## HTTP API
-
-- **`POST /send`** — send a text message
-  ```json
-  { "chat_id": -1001234567890, "text": "Hello" }
-  ```
-
 ### External Services
 
-- **slskd**: `POST /api/v0/searches` for search, transfers API for downloads, YAML options API for blacklist and webhook
+- **slskd**: `POST /api/v0/searches` for search, transfers API for downloads, YAML options API for blacklist
 - **OpenSearch**: hybrid kNN + text search over indexed УК РФ articles
 - **SiliconFlow**: vision LLM for image description
 

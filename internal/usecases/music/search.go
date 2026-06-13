@@ -32,7 +32,7 @@ type SearchMusicService struct {
 	downloadsDir     string
 	fileLimit        int
 	displayLimit     int
-	allowedFormats   []entities.AudioFormat
+	allowedFormats   []string
 	logger           *slog.Logger
 }
 
@@ -45,7 +45,7 @@ func NewSearchMusicService(
 	localSearchRoots []string,
 	fileLimit int,
 	displayLimit int,
-	allowedFormats []entities.AudioFormat,
+	allowedFormats []string,
 	logger *slog.Logger,
 ) *SearchMusicService {
 	if fileLimit < 1 {
@@ -53,16 +53,6 @@ func NewSearchMusicService(
 	}
 	if displayLimit < 1 {
 		displayLimit = 1
-	}
-	if len(allowedFormats) == 0 {
-		allowedFormats = []entities.AudioFormat{
-			entities.AudioFormatMP3,
-			entities.AudioFormatFLAC,
-			entities.AudioFormatOGG,
-			entities.AudioFormatWAV,
-			entities.AudioFormatM4A,
-			entities.AudioFormatAAC,
-		}
 	}
 
 	var peerModerator PeerModerator
@@ -160,14 +150,14 @@ func (s *SearchMusicService) Find(ctx context.Context, chatID int64, messageID i
 	}
 }
 
-func filterSearchTracks(tracks []entities.Track, formats []entities.AudioFormat, minSize, maxSize int64) []entities.Track {
+func filterSearchTracks(tracks []entities.Track, formats []string, minSize, maxSize int64) []entities.Track {
 	tracks = filterByFormats(tracks, formats)
 	tracks = filterByMinSize(tracks, minSize)
 	tracks = filterByMaxSize(tracks, maxSize)
 	return tracks
 }
 
-func filterByFormats(tracks []entities.Track, formats []entities.AudioFormat) []entities.Track {
+func filterByFormats(tracks []entities.Track, formats []string) []entities.Track {
 	if len(formats) == 0 {
 		return tracks
 	}
@@ -176,7 +166,7 @@ func filterByFormats(tracks []entities.Track, formats []entities.AudioFormat) []
 	for _, track := range tracks {
 		name := strings.ToLower(track.Filename)
 		for _, format := range formats {
-			if strings.HasSuffix(name, string(format)) {
+			if strings.HasSuffix(name, format) {
 				filtered = append(filtered, track)
 				break
 			}

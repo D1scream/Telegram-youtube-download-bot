@@ -6,12 +6,9 @@ services:
     env_file: .env
     environment:
       SLSKD_URL: http://slskd:5030
-      SLSKD_WEBHOOK_CALLBACK_URL: http://bot:9000/webhooks/slskd
       SLSKD_DOWNLOADS_DIR: /app/docker/slskd/data/downloads
       SLSKD_MUSIC_DIR: /app/music
       UPLOADED_MUSIC_DIR: /app/uploaded_music
-    ports:
-      - "127.0.0.1:9000:9000"
     volumes:
       - slskd_data:/app/docker/slskd/data
       - ./music:/app/music:ro

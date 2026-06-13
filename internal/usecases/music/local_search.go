@@ -39,7 +39,7 @@ func buildLocalSearchRoots(dirs []string) []localSearchRoot {
 	return roots
 }
 
-func searchLocalTracks(query string, dirs []string, limit int, formats []entities.AudioFormat) ([]entities.Track, error) {
+func searchLocalTracks(query string, dirs []string, limit int, formats []string) ([]entities.Track, error) {
 	tokens := queryTokens(query)
 	if len(tokens) == 0 {
 		return nil, nil
@@ -114,10 +114,10 @@ func queryTokens(query string) []string {
 	return slices.DeleteFunc(parts, func(s string) bool { return s == "" })
 }
 
-func allowedFormatSet(formats []entities.AudioFormat) map[string]struct{} {
+func allowedFormatSet(formats []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(formats))
 	for _, format := range formats {
-		ext := strings.ToLower(string(format))
+		ext := strings.ToLower(format)
 		if !strings.HasPrefix(ext, ".") {
 			ext = "." + ext
 		}

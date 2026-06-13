@@ -21,20 +21,16 @@ const (
 )
 
 type SlskdAdapter struct {
-	baseURL       string
-	apiKey        string
-	webhookURL    string
-	webhookSecret string
-	client        *http.Client
+	baseURL string
+	apiKey  string
+	client  *http.Client
 }
 
-func NewSlskdAdapter(baseURL, apiKey, webhookURL, webhookSecret string) *SlskdAdapter {
+func NewSlskdAdapter(baseURL, apiKey string) *SlskdAdapter {
 	return &SlskdAdapter{
-		baseURL:       strings.TrimRight(baseURL, "/"),
-		apiKey:        strings.TrimSpace(apiKey),
-		webhookURL:    strings.TrimSpace(webhookURL),
-		webhookSecret: strings.TrimSpace(webhookSecret),
-		client:        &http.Client{Timeout: slskdHTTPTimeout},
+		baseURL: strings.TrimRight(baseURL, "/"),
+		apiKey:  strings.TrimSpace(apiKey),
+		client:  &http.Client{Timeout: slskdHTTPTimeout},
 	}
 }
 
@@ -265,11 +261,6 @@ type slskdOptions struct {
 			} `json:"blacklisted"`
 		} `json:"groups"`
 	} `json:"transfers"`
-	Integrations struct {
-		Webhooks struct {
-			TelegramBot map[string]any `json:"telegram_bot"`
-		} `json:"webhooks"`
-	} `json:"integrations"`
 }
 
 func normalizeSlskdPath(path string) string {

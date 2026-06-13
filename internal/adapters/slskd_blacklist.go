@@ -11,24 +11,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (s *SlskdAdapter) EnsureWebhookConfigured(ctx context.Context) error {
-	if s.webhookURL == "" || s.webhookSecret == "" {
-		return nil
-	}
-
-	options, err := s.getRuntimeOptions(ctx)
-	if err != nil {
-		return err
-	}
-	if options.Integrations.Webhooks.TelegramBot != nil {
-		return nil
-	}
-
-	return s.applyRemoteConfigYAML(ctx, func(root map[string]any) {
-		patchWebhook(root, s.webhookURL, s.webhookSecret)
-	})
-}
-
 func (s *SlskdAdapter) GetBlacklistedPeers(ctx context.Context) (map[string]struct{}, error) {
 	members, err := s.getBlacklistedMembers(ctx)
 	if err != nil {
@@ -160,25 +142,6 @@ func mergeRemoteConfigPatches(currentYAML string, patch func(map[string]any)) (s
 		return "", fmt.Errorf("marshal remote yaml: %w", err)
 	}
 	return string(out), nil
-}
-
-func patchWebhook(root map[string]any, webhookURL, webhookSecret string) {
-	setPath(root, map[string]any{
-		"on": []any{"DownloadFileComplete"},
-		"call": map[string]any{
-			"url": webhookURL,
-			"headers": []any{
-				map[string]any{
-					"name":  "X-Webhook-Secret",
-					"value": webhookSecret,
-				},
-			},
-		},
-		"timeout": 30000,
-		"retry": map[string]any{
-			"attempts": 3,
-		},
-	}, "integrations", "webhooks", "telegram_bot")
 }
 
 func patchBlacklist(root map[string]any, members []string) {

@@ -1,22 +1,7 @@
 services:
-  slskd-init:
-    image: alpine:3.19
-    env_file:
-      - .env
-    environment:
-      SLSKD_WEBHOOK_URL: ${SLSKD_WEBHOOK_URL:-http://host.docker.internal:9000/webhooks/slskd}
-      SLSKD_WEBHOOK_SECRET: ${SLSKD_WEBHOOK_SECRET:-}
-    volumes:
-      - ./data:/app
-      - ./init-webhook.sh:/init-webhook.sh:ro
-    entrypoint: ["/bin/sh", "/init-webhook.sh"]
-
   slskd:
     image: slskd/slskd:latest
     container_name: bot-slskd
-    depends_on:
-      slskd-init:
-        condition: service_completed_successfully
     ports:
       - "5030:5030"
       - "50300:50300"

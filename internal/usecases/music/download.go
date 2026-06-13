@@ -37,14 +37,6 @@ type DocumentMessenger interface {
 	ReplyDocument(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error)
 }
 
-type DownloadCompleteEvent struct {
-	LocalFilename  string
-	RemoteFilename string
-	Username       string
-	Filename       string
-	Size           int64
-}
-
 func (s *SearchMusicService) Download(ctx context.Context, chatID int64, messageID int, index int, userID int64) {
 	track, err := s.sessions.Get(chatID, 0, index, ErrNoSession, ErrIndexOutOfRange)
 	if err != nil {
@@ -173,22 +165,6 @@ func isTerminalDownloadState(state string) bool {
 	return strings.Contains(state, "Completed") && !strings.Contains(state, "Succeeded")
 }
 
-func (s *SearchMusicService) HandleDownloadComplete(ctx context.Context, event DownloadCompleteEvent) error {
-	track := eventTrack(event)
-	pending, ok := s.pending.Take(track)
-	if !ok {
-		s.logger.InfoContext(ctx, "Webhook без ожидающего скачивания",
-			"operation", "download_webhook",
-			"username", track.Username,
-			"filename", track.Filename,
-			"size", track.Size,
-		)
-		return ErrDownloadNotFound
-	}
-
-	return s.sendDownloadedFile(ctx, pending, track, event.LocalFilename)
-}
-
 func (s *SearchMusicService) deliverIfPending(ctx context.Context, track entities.Track, chatID int64, messageID int, localFilename string) {
 	pending, ok := s.pending.Take(track)
 	if !ok {
@@ -310,18 +286,6 @@ func (s *SearchMusicService) findDownloadedFile(track entities.Track) (string, e
 		return "", fmt.Errorf("файл не найден в %s", s.downloadsDir)
 	}
 	return matches[0], nil
-}
-
-func eventTrack(event DownloadCompleteEvent) entities.Track {
-	filename := event.Filename
-	if filename == "" {
-		filename = event.RemoteFilename
-	}
-	return entities.Track{
-		Filename: filename,
-		Size:     event.Size,
-		Username: event.Username,
-	}
 }
 
 func resolveLocalPath(localFilename, downloadsDir, downloadsPrefix string) string {
