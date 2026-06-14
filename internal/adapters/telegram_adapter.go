@@ -168,6 +168,43 @@ func (t *TelegramAdapter) ReplyDocument(ctx context.Context, chatID int64, messa
 	return msg.ID, nil
 }
 
+func (t *TelegramAdapter) ReplyVideo(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error) {
+	msg, err := t.bot.SendVideo(ctx, &bot.SendVideoParams{
+		ChatID: chatID,
+		Video: &models.InputFileUpload{
+			Filename: filename,
+			Data:     file,
+		},
+		SupportsStreaming: true,
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                messageID,
+			AllowSendingWithoutReply: true,
+		},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("отправить видео Telegram: %w", err)
+	}
+	return msg.ID, nil
+}
+
+func (t *TelegramAdapter) ReplyAudio(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error) {
+	msg, err := t.bot.SendAudio(ctx, &bot.SendAudioParams{
+		ChatID: chatID,
+		Audio: &models.InputFileUpload{
+			Filename: filename,
+			Data:     file,
+		},
+		ReplyParameters: &models.ReplyParameters{
+			MessageID:                messageID,
+			AllowSendingWithoutReply: true,
+		},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("отправить аудио Telegram: %w", err)
+	}
+	return msg.ID, nil
+}
+
 func (t *TelegramAdapter) DeleteMessages(ctx context.Context, chatID int64, messageIDs []int) error {
 	var lastErr error
 	deleted := 0

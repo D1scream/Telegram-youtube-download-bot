@@ -24,6 +24,11 @@ type Config struct {
 	SlskdDownloadsDir        string  `env:"SLSKD_DOWNLOADS_DIR" envDefault:"docker/slskd/data/downloads"`
 	SlskdMusicDir            string  `env:"SLSKD_MUSIC_DIR" envDefault:"music"`
 	UploadedMusicDir         string  `env:"UPLOADED_MUSIC_DIR" envDefault:"uploaded_music"`
+	YtdlpEnabled             bool    `env:"YT_DLP_ENABLED" envDefault:"false"`
+	YtdlpPath                string  `env:"YT_DLP_PATH" envDefault:"yt-dlp"`
+	YtdlpDownloadDir         string  `env:"YT_DLP_DOWNLOAD_DIR" envDefault:"yt_downloads"`
+	YtdlpCookiesFile         string  `env:"YT_DLP_COOKIES_FILE"`
+	YtdlpCookiesFromBrowser  string  `env:"YT_DLP_COOKIES_FROM_BROWSER"`
 }
 
 func LoadConfig() (*Config, error) {

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"telegram-bot/internal/entities"
 )
@@ -106,23 +107,22 @@ func (s *SearchMusicService) Find(ctx context.Context, chatID int64, messageID i
 		s.logger.WarnContext(ctx, "Не удалось выполнить локальный поиск", "query", query, "err", err)
 	}
 
-	remoteTracks, err := s.searcher.Search(ctx, query, s.fileLimit)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "Не удалось найти музыку в Soulseek", "query", query, "err", err)
-		remoteTracks = nil
-	} else {
-		s.logger.InfoContext(ctx, "Поиск slskd завершён", "operation", "find_music", "query", query, "tracks", len(remoteTracks))
-	}
-
 	localTracks = filterSearchTracks(localTracks, s.allowedFormats, minTrackSize, maxTrackSize)
 	s.logger.InfoContext(ctx, "Локальный поиск завершён", "operation", "find_music", "query", query, "tracks", len(localTracks))
 
-	remoteTracks = filterSearchTracks(remoteTracks, s.allowedFormats, minTrackSize, maxTrackSize)
-	if len(remoteTracks) > 0 {
-		if banned, banErr := s.loadBlacklistedPeers(ctx); banErr != nil {
-			s.logger.WarnContext(ctx, "Не удалось получить blacklist slskd", "err", banErr)
-		} else {
-			remoteTracks = filterBannedPeers(remoteTracks, banned)
+	parsed := parseQuery(query)
+	remoteTracks := s.searchRemoteTracks(ctx, parsed.included)
+	remoteTracks = dropExcluded(remoteTracks, parsed.excluded)
+
+	if len(remoteTracks) == 0 {
+		if bypass, ok := wildcardBypassIncluded(parsed.included); ok {
+			s.logger.InfoContext(ctx, "Повтор поиска с wildcard-обходом",
+				"operation", "find_music",
+				"query", query,
+				"bypass_query", bypass,
+			)
+			remoteTracks = s.searchRemoteTracks(ctx, bypass)
+			remoteTracks = dropExcluded(remoteTracks, parsed.excluded)
 		}
 	}
 
@@ -217,9 +217,101 @@ func filterByMaxSize(tracks []entities.Track, maxSize int64) []entities.Track {
 	return filtered
 }
 
+func (s *SearchMusicService) searchRemoteTracks(ctx context.Context, query string) []entities.Track {
+	tracks, err := s.searcher.Search(ctx, query, s.fileLimit)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "Не удалось найти музыку в Soulseek", "query", query, "err", err)
+		return nil
+	}
+	s.logger.InfoContext(ctx, "Поиск slskd завершён", "operation", "find_music", "query", query, "tracks", len(tracks))
+
+	tracks = filterSearchTracks(tracks, s.allowedFormats, minTrackSize, maxTrackSize)
+	if len(tracks) == 0 {
+		return tracks
+	}
+
+	if banned, banErr := s.loadBlacklistedPeers(ctx); banErr != nil {
+		s.logger.WarnContext(ctx, "Не удалось получить blacklist slskd", "err", banErr)
+	} else {
+		tracks = filterBannedPeers(tracks, banned)
+	}
+	return tracks
+}
+
 func (s *SearchMusicService) loadBlacklistedPeers(ctx context.Context) (map[string]struct{}, error) {
 	if s.peerModerator == nil {
 		return nil, nil
 	}
 	return s.peerModerator.GetBlacklistedPeers(ctx)
+}
+
+type parsedQuery struct {
+	included string
+	tokens   []string
+	excluded []string
+}
+
+func parseQuery(query string) parsedQuery {
+	var ins, tokens, excluded []string
+	for _, word := range strings.Fields(query) {
+		if len(word) > 1 && word[0] == '-' {
+			excluded = append(excluded, strings.ToLower(word[1:]))
+			continue
+		}
+		if word == "" {
+			continue
+		}
+		ins = append(ins, word)
+		token := strings.ToLower(strings.TrimPrefix(word, "*"))
+		if token != "" {
+			tokens = append(tokens, token)
+		}
+	}
+	return parsedQuery{
+		included: strings.Join(ins, " "),
+		tokens:   tokens,
+		excluded: excluded,
+	}
+}
+
+func wildcardBypassIncluded(included string) (string, bool) {
+	words := strings.Fields(included)
+	if len(words) == 0 {
+		return included, false
+	}
+	out := make([]string, 0, len(words))
+	changed := false
+	for _, word := range words {
+		if strings.HasPrefix(word, "*") {
+			out = append(out, word)
+			continue
+		}
+		for i, r := range word {
+			out = append(out, "*"+word[i+utf8.RuneLen(r):])
+			changed = true
+			break
+		}
+	}
+	return strings.Join(out, " "), changed
+}
+
+func dropExcluded(tracks []entities.Track, excluded []string) []entities.Track {
+	if len(excluded) == 0 {
+		return tracks
+	}
+	out := make([]entities.Track, 0, len(tracks))
+	for _, track := range tracks {
+		path := strings.ToLower(strings.ReplaceAll(track.Filename, "\\", "/"))
+		bad := false
+		for _, term := range excluded {
+			if strings.Contains(path, term) {
+				bad = true
+				break
+			}
+		}
+		if !bad {
+			out = append(out, track)
+		}
+	}
+	return out
 }

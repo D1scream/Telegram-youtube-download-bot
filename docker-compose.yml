@@ -9,10 +9,14 @@ services:
       SLSKD_DOWNLOADS_DIR: /app/docker/slskd/data/downloads
       SLSKD_MUSIC_DIR: /app/music
       UPLOADED_MUSIC_DIR: /app/uploaded_music
+      YT_DLP_ENABLED: "true"
+      YT_DLP_DOWNLOAD_DIR: /app/yt_downloads
+      YT_DLP_COOKIES_FILE: /app/secrets/youtube_cookies.txt
     volumes:
       - slskd_data:/app/docker/slskd/data
       - ./music:/app/music:ro
       - ./uploaded_music:/app/uploaded_music
+      - ./secrets/youtube_cookies.txt:/app/secrets/youtube_cookies.txt:ro
     depends_on:
       slskd:
         condition: service_started

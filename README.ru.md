@@ -110,7 +110,7 @@ docker compose up -d --build
 
 - `/find <запрос>` — поиск музыки: `[C]` локально, затем Soulseek
 - `/downloadN` — скачать трек N из последнего `/find`
-- `/upload` + файл — загрузить аудио (до 20 МБ, лимит Bot API todo: развернуть telegram bot api)
+- `/upload` + файл — загрузить аудио (до 20 МБ, лимит Bot API)
 - `/mymusic` — список своих загрузок и кэша (стр. 1)
 - `/mymusic N` — страница N списка
 - `/deleteN` — удалить файл N из последнего `/mymusic`

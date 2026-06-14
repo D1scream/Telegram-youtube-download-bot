@@ -27,6 +27,11 @@ type MyMusicHandler interface {
 	Delete(ctx context.Context, chatID int64, messageID int, index int, userID int64)
 }
 
+type YoutubeHandler interface {
+	DownloadMusic(ctx context.Context, chatID int64, messageID int, url string)
+	DownloadVideo(ctx context.Context, chatID int64, messageID int, url string)
+}
+
 type Messenger interface {
 	ReplyToChat(ctx context.Context, chatID int64, messageID int, text string) (int, error)
 }
@@ -36,6 +41,7 @@ type Handler struct {
 	music       MusicHandler
 	musicUpload MusicUploader
 	myMusic     MyMusicHandler
+	youtube     YoutubeHandler
 	messenger   Messenger
 	logger      *slog.Logger
 }
@@ -45,6 +51,7 @@ func NewHandler(
 	music MusicHandler,
 	musicUpload MusicUploader,
 	myMusic MyMusicHandler,
+	youtube YoutubeHandler,
 	messenger Messenger,
 	logger *slog.Logger,
 ) *Handler {
@@ -53,6 +60,7 @@ func NewHandler(
 		music:       music,
 		musicUpload: musicUpload,
 		myMusic:     myMusic,
+		youtube:     youtube,
 		messenger:   messenger,
 		logger:      logger.With("component", "telegram_handler"),
 	}
@@ -71,8 +79,17 @@ func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 func (h *Handler) handleCommand(ctx context.Context, msg *models.Message) bool {
 	cmd, args, _ := strings.Cut(messageCommandLine(msg), " ")
 	switch {
+	case isCommand(cmd, "help"):
+		h.handleHelp(ctx, msg)
+		return true
 	case isCommand(cmd, "find"):
 		h.handleFind(ctx, msg, args)
+		return true
+	case isCommand(cmd, "ytm"):
+		h.handleYtm(ctx, msg, args)
+		return true
+	case isCommand(cmd, "ytv"):
+		h.handleYtv(ctx, msg, args)
 		return true
 	case isCommand(cmd, "upload"):
 		h.handleUpload(ctx, msg)
@@ -100,6 +117,33 @@ func messageCommandLine(msg *models.Message) string {
 
 func hasMusicAttachment(msg *models.Message) bool {
 	return msg.Document != nil || msg.Audio != nil
+}
+
+const helpMessage = `Команды
+/find <запрос> — поиск музыки
+/downloadN — скачать трек N из последнего /find
+/upload — загрузить свою музыку, указать файл в сообщении
+/mymusic [страница] — ваши файлы
+/deleteN — удалить файл N из /mymusic
+/ytm <URL> — аудио с YouTube
+/ytv <URL> — видео с YouTube (mkv)
+
+Поиск (/find)
+Поиск полнотекстовый, по подстрокам слов
+Если ничего не найдено, бот повторит запрос с более мягкими фильтрами
+
+Аргументы запроса:
+*слово — неполное слово (*ichael → Michael)
+-слово — исключить из результатов (-remix)
+Пример: /find *ichael -live
+
+Советы:
+• [C] — файл на сервере бота, без Soulseek`
+
+func (h *Handler) handleHelp(ctx context.Context, msg *models.Message) {
+	if _, err := h.messenger.ReplyToChat(ctx, msg.Chat.ID, msg.ID, helpMessage); err != nil {
+		h.logger.ErrorContext(ctx, "Не удалось отправить /help", "err", err)
+	}
 }
 
 func (h *Handler) handleMyMusic(ctx context.Context, msg *models.Message, pageArg string) {
@@ -192,6 +236,26 @@ func (h *Handler) handleDownload(ctx context.Context, msg *models.Message, cmd, 
 		userID = msg.From.ID
 	}
 	h.music.Download(ctx, msg.Chat.ID, msg.ID, index, userID)
+}
+
+func (h *Handler) handleYtm(ctx context.Context, msg *models.Message, url string) {
+	if h.youtube == nil {
+		if _, err := h.messenger.ReplyToChat(ctx, msg.Chat.ID, msg.ID, "YouTube недоступен (yt-dlp не настроен)"); err != nil {
+			h.logger.ErrorContext(ctx, "Не удалось отправить ответ ytm", "err", err)
+		}
+		return
+	}
+	h.youtube.DownloadMusic(ctx, msg.Chat.ID, msg.ID, url)
+}
+
+func (h *Handler) handleYtv(ctx context.Context, msg *models.Message, url string) {
+	if h.youtube == nil {
+		if _, err := h.messenger.ReplyToChat(ctx, msg.Chat.ID, msg.ID, "YouTube недоступен (yt-dlp не настроен)"); err != nil {
+			h.logger.ErrorContext(ctx, "Не удалось отправить ответ ytv", "err", err)
+		}
+		return
+	}
+	h.youtube.DownloadVideo(ctx, msg.Chat.ID, msg.ID, url)
 }
 
 func isCommand(token, name string) bool {

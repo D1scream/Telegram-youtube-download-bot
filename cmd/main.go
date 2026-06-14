@@ -16,6 +16,7 @@ import (
 	"telegram-bot/internal/transport/telegram"
 	"telegram-bot/internal/usecases/imageuk"
 	"telegram-bot/internal/usecases/music"
+	"telegram-bot/internal/usecases/youtube"
 )
 
 func main() {
@@ -46,7 +47,8 @@ func main() {
 	musicService := newMusicService(cfg, telegramAdapter, logger)
 	musicUploader := newMusicUploader(cfg, musicService, telegramAdapter, logger)
 	myMusicService := music.NewMyMusicService(musicUploader, musicService, telegramAdapter, telegramAdapter, logger)
-	telegramHandler := telegram.NewHandler(photoAnalyzer, musicService, musicUploader, myMusicService, telegramAdapter, logger)
+	youtubeService := newYoutubeService(cfg, telegramAdapter, logger)
+	telegramHandler := telegram.NewHandler(photoAnalyzer, musicService, musicUploader, myMusicService, youtubeService, telegramAdapter, logger)
 
 	logger.Info("Telegram polling запущен")
 	if err := telegramAdapter.StartPolling(ctx, telegramHandler.HandleMessage); err != nil {
@@ -125,4 +127,23 @@ func newMusicUploader(cfg *config.Config, musicService *music.SearchMusicService
 		cfg.MusicAllowedFormats(),
 		logger,
 	)
+}
+
+func newYoutubeService(cfg *config.Config, telegramAdapter *adapters.TelegramAdapter, logger *slog.Logger) *youtube.DownloadService {
+	if !cfg.YtdlpEnabled {
+		logger.Info("YouTube /ytm /ytv отключены (YT_DLP_ENABLED=false)")
+		return nil
+	}
+	ytdlp, err := adapters.NewYtdlpAdapter(adapters.YtdlpConfig{
+		BinPath:        cfg.YtdlpPath,
+		CookiesFile:    cfg.YtdlpCookiesFile,
+		CookiesBrowser: cfg.YtdlpCookiesFromBrowser,
+		OutputDir:      cfg.YtdlpDownloadDir,
+	})
+	if err != nil {
+		logger.Error("YouTube отключён", "err", err)
+		return nil
+	}
+	logger.Info("YouTube /ytm /ytv включены", "cookies_file", cfg.YtdlpCookiesFile, "cookies_browser", cfg.YtdlpCookiesFromBrowser)
+	return youtube.NewDownloadService(ytdlp, telegramAdapter, telegramAdapter, logger)
 }

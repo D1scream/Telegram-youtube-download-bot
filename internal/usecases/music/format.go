@@ -49,7 +49,8 @@ func truncateDisplayPath(display string) string {
 	if len(runes) <= maxDisplayPathLen {
 		return display
 	}
-	return string(runes[:maxDisplayPathLen-1]) + "…"
+	start := len(runes) - (maxDisplayPathLen - 1)
+	return "…" + string(runes[start:])
 }
 
 func formatUploadSpeed(bps int) string {

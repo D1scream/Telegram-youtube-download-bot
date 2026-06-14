@@ -8,13 +8,16 @@ import (
 )
 
 func TestTruncateDisplayPath(t *testing.T) {
-	long := strings.Repeat("a", 200) + ".mp3"
+	long := strings.Repeat("a", 200) + "Umbrella.mp3"
 	got := truncateDisplayPath(long)
 	if len([]rune(got)) != maxDisplayPathLen {
 		t.Fatalf("expected len %d, got %d", maxDisplayPathLen, len([]rune(got)))
 	}
-	if !strings.HasSuffix(got, "…") {
-		t.Fatalf("expected ellipsis suffix: %q", got)
+	if !strings.HasPrefix(got, "…") {
+		t.Fatalf("expected ellipsis prefix: %q", got)
+	}
+	if !strings.HasSuffix(got, "Umbrella.mp3") {
+		t.Fatalf("expected filename at end: %q", got)
 	}
 }
 

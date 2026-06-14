@@ -40,8 +40,8 @@ func buildLocalSearchRoots(dirs []string) []localSearchRoot {
 }
 
 func searchLocalTracks(query string, dirs []string, limit int, formats []string) ([]entities.Track, error) {
-	tokens := queryTokens(query)
-	if len(tokens) == 0 {
+	parsed := parseQuery(query)
+	if len(parsed.tokens) == 0 {
 		return nil, nil
 	}
 	if limit < 1 {
@@ -79,7 +79,7 @@ func searchLocalTracks(query string, dirs []string, limit int, formats []string)
 				return nil
 			}
 			displayPath := root.label + "/" + filepath.ToSlash(rel)
-			if !pathMatchesQuery(displayPath, tokens) {
+			if !pathMatchesQuery(displayPath, parsed.tokens) {
 				return nil
 			}
 
@@ -102,16 +102,12 @@ func searchLocalTracks(query string, dirs []string, limit int, formats []string)
 		}
 	}
 
-	sortLocalTracks(tracks, tokens)
+	sortLocalTracks(tracks, parsed.tokens)
+	tracks = dropExcluded(tracks, parsed.excluded)
 	if len(tracks) > limit {
 		tracks = tracks[:limit]
 	}
 	return tracks, nil
-}
-
-func queryTokens(query string) []string {
-	parts := strings.Fields(strings.ToLower(query))
-	return slices.DeleteFunc(parts, func(s string) bool { return s == "" })
 }
 
 func allowedFormatSet(formats []string) map[string]struct{} {
