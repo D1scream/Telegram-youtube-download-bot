@@ -2,49 +2,46 @@
 
 [Русский](README.ru.md)
 
-Telegram bot with features: music search and download via Soulseek ([slskd](https://github.com/slskd/slskd)), local library and user uploads, image analysis with Criminal Code of the Russian Federation (УК РФ) article lookup via OpenSearch and an LLM.
-
-Features are enabled by configuration. Only `BOT_TOKEN` is required.
+Go Telegram bot: music search and download via Soulseek ([slskd](https://github.com/slskd/slskd)) and a local library, YouTube audio/video downloads, image analysis with Criminal Code of the Russian Federation (УК РФ) article lookup via OpenSearch and an LLM.
 
 ## Features
 
-- **Search** (`/find <query>`): Soulseek search + local files `[C]`
-- **Download** (`/downloadN`): download a track from search results, clean up session messages
-- **Upload** (`/upload` + audio file): save to `uploaded_music/`, available in `/find`
-- **My files** (`/mymusic`, `/mymusic 2`): list user files (uploaded and cached)
-- **Delete** (`/deleteN`): delete a file by number from `/mymusic`
-- **Image analysis** (photo): describe the image with an LLM, search matching УК РФ articles in OpenSearch, reply with results
+- **Music** (`SLSKD_URL`): search `/find`, download `/downloadN`, upload `/upload`, list `/mymusic`, delete `/deleteN`
+- **YouTube** (`YT_DLP_ENABLED`): audio `/ytm`, video `/ytv`
+- **Image analysis** (`OPENSEARCH_URL` + `LLM_API`): describe photos with an LLM, search УК РФ articles in OpenSearch
 
 ## Technologies
 
 - **Language**: Go 1.25
-- **APIs**: Telegram Bot API, slskd REST, OpenSearch, SiliconFlow LLM, TEI embeddings
+- **APIs**: Telegram Bot API, slskd REST, yt-dlp, OpenSearch, SiliconFlow LLM, TEI embeddings
 - **Libraries**: `go-telegram/bot`, `go.senan.xyz/taglib`, `caarlos0/env`, `godotenv`
 - **Architecture**: `adapters` → `usecases` → `transport` layers, DI in `cmd/main.go`
 - **Containerization**: Docker, Docker Compose
 
 ## Project Structure
 ```text
-├── cmd/                        # Application entry point
+├── cmd/
 ├── internal/
-│   ├── adapters/               # Telegram, slskd, OpenSearch, LLM
+│   ├── adapters/               # Telegram, slskd, OpenSearch, LLM, yt-dlp
 │   ├── config/                 # Configuration loading
 │   ├── entities/               # Domain entities
 │   ├── transport/
 │   │   └── telegram/           # Telegram command handler
 │   └── usecases/
 │       ├── imageuk/            # Photo analysis and article search
-│       └── music/              # Search, upload, mymusic, local search
+│       ├── music/              # Search, upload, mymusic, local search
+│       └── youtube/            # YouTube downloads
 ├── docker/
 │   ├── opensearch/             # OpenSearch stack for image analysis
 │   └── slskd/                  # Local slskd compose and config
 ├── prompts/                    # LLM system prompts
+├── secrets/
 ├── music/                      # Local library (volume)
 ├── uploaded_music/             # User uploads (volume)
-├── docker-compose.yml          # Production stack (bot + slskd)
+├── docker-compose.yml          # Bot + slskd stack
 ├── Dockerfile
 ├── example.env
-└── README.ru.md
+└── README.md
 ```
 
 ## Quick Start
@@ -52,7 +49,7 @@ Features are enabled by configuration. Only `BOT_TOKEN` is required.
 ### Prerequisites
 
 - Go 1.25+
-- Docker and Docker Compose
+- Docker and Docker Compose — for slskd; OpenSearch separately, if image analysis is needed
 
 ### Setup
 
@@ -63,9 +60,10 @@ Features are enabled by configuration. Only `BOT_TOKEN` is required.
    SLSKD_SLSK_USERNAME=your_username
    SLSKD_SLSK_PASSWORD=your_password
    ```
-3. **Image analysis** (optional) — `OPENSEARCH_URL`, `LLM_API`.
+3. **YouTube** (optional) — `YT_DLP_ENABLED=true`, path to `yt-dlp`, cookies in `secrets/youtube_cookies.txt` if needed.
+4. **Image analysis** (optional) — deploy the stack and index data: [docker/opensearch/README.md](docker/opensearch/README.md), then set `OPENSEARCH_URL`, `LLM_API`.
 
-`SLSKD_URL`, directory paths, and other variables with defaults are set in `docker-compose.yml`.
+`SLSKD_URL`, directory paths, and other variables with defaults — in `docker-compose.yml` and `example.env`.
 
 ### Running
 
@@ -75,7 +73,7 @@ docker compose up -d --build
 
 ## Configuration
 
-Bot variables go in `.env`.
+Bot variables go in `.env`. Full list — in `example.env` and `internal/config/config.go`.
 
 - `BOT_TOKEN` (required) — Telegram bot token from BotFather
 
@@ -83,23 +81,18 @@ Bot variables go in `.env`.
 
 - `SLSKD_URL` — slskd base URL
 - `SLSKD_API_KEY` — slskd API key, if auth is enabled
-- `SLSKD_SEARCH_FILE_LIMIT` — max files per search, local + slskd, default `50`
-- `SLSKD_SEARCH_DISPLAY_LIMIT` — max tracks in `/find` reply, default `10`
-- `SLSKD_ALLOWED_FORMATS` — allowed formats, default `mp3,flac,ogg,wav,m4a,aac,webm`
-- `SLSKD_DOWNLOADS_DIR` — slskd download cache, default `docker/slskd/data/downloads`
 - `SLSKD_MUSIC_DIR` — local library, default `music`
 - `UPLOADED_MUSIC_DIR` — user uploads, default `uploaded_music`
+
+**YouTube** (`YT_DLP_ENABLED=true`):
+
+- `YT_DLP_PATH` — path to `yt-dlp`, default `yt-dlp`
+- `YT_DLP_COOKIES_FILE`, `YT_DLP_COOKIES_FROM_BROWSER` — cookies when blocked
 
 **Image analysis** (`OPENSEARCH_URL` enables photo handling):
 
 - `OPENSEARCH_URL` — OpenSearch URL
 - `LLM_API` — SiliconFlow API key
-- `LLM_SYSTEM_PROMPT_PATH` — system prompt path, default `prompts/image_analysis_system.txt`
-- `OPENSEARCH_INDEX` — index name, default `uk_rf`
-- `OPENSEARCH_SEARCH_PIPELINE` — search pipeline, default `uk_rf-hybrid`
-- `EMBEDDINGS_URL` — TEI embeddings service, default `http://localhost:8080`
-- `SEARCH_KNN_K` — kNN neighbours for search, default `20`
-- `SEARCH_MIN_SCORE` — minimum relevance score, default `0.55`
 
 **Soulseek** (same `.env`, used by the slskd container):
 
@@ -109,10 +102,12 @@ Bot variables go in `.env`.
 
 - `/find <query>` — search music: `[C]` locally, then Soulseek
 - `/downloadN` — download track N from the last `/find`
-- `/upload` + file — upload audio (up to 20 MB, Bot API limit; todo: deploy local Bot API)
+- `/upload` + file — upload audio (up to 20 MB, Bot API limit)
 - `/mymusic` — list your uploads and cache (page 1)
 - `/mymusic N` — page N of the list
 - `/deleteN` — delete file N from the last `/mymusic`
+- `/ytm <URL>` — download audio from YouTube
+- `/ytv <URL>` — download video from YouTube (mkv)
 - photo — analyze image (when OpenSearch is configured)
 
 ## Schedule
@@ -122,8 +117,10 @@ Bot variables go in `.env`.
 
 ### External Services
 
-- **slskd**: `POST /api/v0/searches` for search, transfers API for downloads, YAML options API for blacklist
-- **OpenSearch**: hybrid kNN + text search over indexed УК РФ articles
-- **SiliconFlow**: vision LLM for image description
+- **slskd** — search and download via Soulseek
+- **yt-dlp** — YouTube downloads
+- **OpenSearch** — hybrid kNN + text search over УК РФ articles
+- **SiliconFlow** — vision LLM for image description
 
-On disk: `downloads/` (slskd cache), `music/` (library), `uploaded_music/` (uploads).
+
+On disk: `docker/slskd/data/downloads/` (slskd cache), `music/` (library), `uploaded_music/` (uploads).
