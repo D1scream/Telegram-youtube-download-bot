@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-Telegram-бот с возможностями: поиск и скачивание музыки через Soulseek ([slskd](https://github.com/slskd/slskd)), локальная библиотека и загрузки пользователей, анализ изображений с поиском статей УК РФ через OpenSearch и LLM.
+Telegram-бот с возможностями поискf и скачиваниz музыки через Soulseek ([slskd](https://github.com/slskd/slskd)) и youtube, анализ изображений с поиском статей УК РФ через OpenSearch и LLM.
 
 Функции включаются через конфигурацию. Обязателен только `BOT_TOKEN`.
 
