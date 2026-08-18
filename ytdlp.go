@@ -1,4 +1,4 @@
-package adapters
+package main
 
 import (
 	"bytes"
@@ -14,32 +14,31 @@ import (
 
 const ytdlpDownloadTimeout = 30 * time.Minute
 
-type YtdlpConfig struct {
-	BinPath        string
-	CookiesFile    string
-	CookiesBrowser string
-	OutputDir      string
+type ytdlp struct {
+	bin            string
+	cookiesFile    string
+	cookiesBrowser string
+	outputDir      string
 }
 
-type YtdlpAdapter struct {
-	cfg YtdlpConfig
-}
-
-func NewYtdlpAdapter(cfg YtdlpConfig) (*YtdlpAdapter, error) {
-	bin, err := resolveYtdlpBin(cfg.BinPath)
+func newYtdlp(cfg config) (*ytdlp, error) {
+	bin, err := resolveYtdlpBin(cfg.YtdlpPath)
 	if err != nil {
 		return nil, err
 	}
-	outDir := strings.TrimSpace(cfg.OutputDir)
+	outDir := strings.TrimSpace(cfg.YtdlpDownloadDir)
 	if outDir == "" {
 		outDir = "yt_downloads"
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return nil, fmt.Errorf("создать каталог yt-dlp: %w", err)
 	}
-	cfg.BinPath = bin
-	cfg.OutputDir = outDir
-	return &YtdlpAdapter{cfg: cfg}, nil
+	return &ytdlp{
+		bin:            bin,
+		cookiesFile:    cfg.YtdlpCookiesFile,
+		cookiesBrowser: cfg.YtdlpCookiesFromBrowser,
+		outputDir:      outDir,
+	}, nil
 }
 
 func resolveYtdlpBin(bin string) (string, error) {
@@ -63,16 +62,16 @@ func resolveYtdlpBin(bin string) (string, error) {
 	return path, nil
 }
 
-func (y *YtdlpAdapter) DownloadAudio(ctx context.Context, pageURL string) (string, error) {
+func (y *ytdlp) downloadAudio(ctx context.Context, pageURL string) (string, error) {
 	return y.download(ctx, pageURL, "bestaudio", "%(title)s [audio].%(ext)s", "")
 }
 
-func (y *YtdlpAdapter) DownloadVideo(ctx context.Context, pageURL string) (string, error) {
+func (y *ytdlp) downloadVideo(ctx context.Context, pageURL string) (string, error) {
 	return y.download(ctx, pageURL, "bestvideo+bestaudio/best", "%(title)s [video].%(ext)s", "mkv")
 }
 
-func (y *YtdlpAdapter) download(ctx context.Context, pageURL, format, outputTemplate, mergeFormat string) (string, error) {
-	workDir, err := os.MkdirTemp(y.cfg.OutputDir, "job-*")
+func (y *ytdlp) download(ctx context.Context, pageURL, format, outputTemplate, mergeFormat string) (string, error) {
+	workDir, err := os.MkdirTemp(y.outputDir, "job-*")
 	if err != nil {
 		return "", err
 	}
@@ -96,7 +95,7 @@ func (y *YtdlpAdapter) download(ctx context.Context, pageURL, format, outputTemp
 	ctx, cancel := context.WithTimeout(ctx, ytdlpDownloadTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, y.cfg.BinPath, args...)
+	cmd := exec.CommandContext(ctx, y.bin, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -109,9 +108,7 @@ func (y *YtdlpAdapter) download(ctx context.Context, pageURL, format, outputTemp
 		return "", fmt.Errorf("yt-dlp: %s", msg)
 	}
 
-	path := strings.TrimSpace(string(out))
-	lines := strings.Split(path, "\n")
-	path = strings.TrimSpace(lines[len(lines)-1])
+	path := lastNonEmptyLine(string(out))
 	if path == "" {
 		return "", fmt.Errorf("yt-dlp: пустой путь к файлу")
 	}
@@ -121,8 +118,8 @@ func (y *YtdlpAdapter) download(ctx context.Context, pageURL, format, outputTemp
 	return path, nil
 }
 
-func (y *YtdlpAdapter) appendCookieArgs(args *[]string, workDir string) error {
-	if file := strings.TrimSpace(y.cfg.CookiesFile); file != "" {
+func (y *ytdlp) appendCookieArgs(args *[]string, workDir string) error {
+	if file := strings.TrimSpace(y.cookiesFile); file != "" {
 		if _, err := os.Stat(file); err == nil {
 			writable := filepath.Join(workDir, "cookies.txt")
 			if err := copyFile(file, writable); err != nil {
@@ -132,10 +129,19 @@ func (y *YtdlpAdapter) appendCookieArgs(args *[]string, workDir string) error {
 			return nil
 		}
 	}
-	if browser := strings.TrimSpace(y.cfg.CookiesBrowser); browser != "" {
+	if browser := strings.TrimSpace(y.cookiesBrowser); browser != "" {
 		*args = append(*args, "--cookies-from-browser", browser)
 	}
 	return nil
+}
+
+func lastNonEmptyLine(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 func copyFile(src, dst string) error {

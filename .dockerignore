@@ -1,9 +1,8 @@
 .git
 .env
-docker/opensearch
 .temp
 tmp_*
-*.json
 bot-linux
 coverage.out
 **/.cache
+yt_downloads

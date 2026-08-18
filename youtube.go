@@ -1,4 +1,4 @@
-package youtube
+package main
 
 import (
 	"context"
@@ -15,38 +15,9 @@ const (
 	downloadTimeout        = 31 * time.Minute
 )
 
-type YtdlpDownloader interface {
-	DownloadAudio(ctx context.Context, pageURL string) (string, error)
-	DownloadVideo(ctx context.Context, pageURL string) (string, error)
-}
-
-type Messenger interface {
-	ReplyToChat(ctx context.Context, chatID int64, messageID int, text string) (int, error)
-	ReplyAudio(
-		ctx context.Context,
-		chatID int64,
-		messageID int,
-		filename string,
-		file *os.File,
-	) (int, error)
-	ReplyVideo(
-		ctx context.Context,
-		chatID int64,
-		messageID int,
-		filename string,
-		file *os.File,
-	) (int, error)
-}
-
 type fileDownloader func(ctx context.Context, pageURL string) (path string, err error)
 
-type fileSender func(
-	ctx context.Context,
-	chatID int64,
-	messageID int,
-	filename string,
-	file *os.File,
-) (int, error)
+type fileSender func(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error)
 
 type downloadJob struct {
 	chatID    int64
@@ -56,49 +27,55 @@ type downloadJob struct {
 	send      fileSender
 }
 
-type DownloadService struct {
-	downloader YtdlpDownloader
-	messenger  Messenger
-	logger     *slog.Logger
+type ytService struct {
+	ytdlp  *ytdlp
+	tg     *Bot
+	logger *slog.Logger
 }
 
-func NewDownloadService(
-	downloader YtdlpDownloader,
-	messenger Messenger,
-	logger *slog.Logger,
-) *DownloadService {
-	return &DownloadService{
-		downloader: downloader,
-		messenger:  messenger,
-		logger:     logger.With("component", "youtube_download"),
+func newYouTube(cfg config, tg *Bot, logger *slog.Logger) *ytService {
+	if !cfg.YtdlpEnabled {
+		logger.Info("YouTube /ytm /ytv отключены (YT_DLP_ENABLED=false)")
+		return nil
+	}
+	dl, err := newYtdlp(cfg)
+	if err != nil {
+		logger.Error("YouTube отключён", "err", err)
+		return nil
+	}
+	logger.Info("YouTube /ytm /ytv включены", "cookies_file", cfg.YtdlpCookiesFile, "cookies_browser", cfg.YtdlpCookiesFromBrowser)
+	return &ytService{
+		ytdlp:  dl,
+		tg:     tg,
+		logger: logger.With("component", "youtube_download"),
 	}
 }
 
-func (s *DownloadService) DownloadMusic(ctx context.Context, chatID int64, messageID int, rawURL string) {
+func (s *ytService) downloadMusic(ctx context.Context, chatID int64, messageID int, rawURL string) {
 	s.startDownload(downloadJob{
 		chatID:    chatID,
 		messageID: messageID,
 		rawURL:    rawURL,
-		download:  s.downloader.DownloadAudio,
-		send:      s.messenger.ReplyAudio,
+		download:  s.ytdlp.downloadAudio,
+		send:      s.tg.ReplyAudio,
 	})
 }
 
-func (s *DownloadService) DownloadVideo(ctx context.Context, chatID int64, messageID int, rawURL string) {
+func (s *ytService) downloadVideo(ctx context.Context, chatID int64, messageID int, rawURL string) {
 	s.startDownload(downloadJob{
 		chatID:    chatID,
 		messageID: messageID,
 		rawURL:    rawURL,
-		download:  s.downloader.DownloadVideo,
-		send:      s.messenger.ReplyVideo,
+		download:  s.ytdlp.downloadVideo,
+		send:      s.tg.ReplyVideo,
 	})
 }
 
-func (s *DownloadService) startDownload(job downloadJob) {
+func (s *ytService) startDownload(job downloadJob) {
 	go s.runDownload(job)
 }
 
-func (s *DownloadService) runDownload(job downloadJob) {
+func (s *ytService) runDownload(job downloadJob) {
 	workCtx, cancel := context.WithTimeout(context.Background(), downloadTimeout)
 	defer cancel()
 
@@ -106,7 +83,7 @@ func (s *DownloadService) runDownload(job downloadJob) {
 	path, err := job.download(workCtx, pageURL)
 	if err != nil {
 		s.logger.ErrorContext(workCtx, "yt-dlp ошибка", "url", pageURL, "err", err)
-		if _, replyErr := s.messenger.ReplyToChat(
+		if _, replyErr := s.tg.ReplyToChat(
 			workCtx,
 			job.chatID,
 			job.messageID,
@@ -120,7 +97,7 @@ func (s *DownloadService) runDownload(job downloadJob) {
 
 	info, err := os.Stat(path)
 	if err != nil {
-		if _, replyErr := s.messenger.ReplyToChat(
+		if _, replyErr := s.tg.ReplyToChat(
 			workCtx,
 			job.chatID,
 			job.messageID,
@@ -136,7 +113,7 @@ func (s *DownloadService) runDownload(job downloadJob) {
 			"Файл слишком большой для Telegram (%.1f MB, лимит 50 MB)",
 			float64(info.Size())/(1024*1024),
 		)
-		if _, replyErr := s.messenger.ReplyToChat(workCtx, job.chatID, job.messageID, reply); replyErr != nil {
+		if _, replyErr := s.tg.ReplyToChat(workCtx, job.chatID, job.messageID, reply); replyErr != nil {
 			s.logger.ErrorContext(workCtx, "Не удалось отправить ответ YouTube", "err", replyErr)
 		}
 		return
@@ -144,7 +121,7 @@ func (s *DownloadService) runDownload(job downloadJob) {
 
 	file, err := os.Open(path)
 	if err != nil {
-		if _, replyErr := s.messenger.ReplyToChat(
+		if _, replyErr := s.tg.ReplyToChat(
 			workCtx,
 			job.chatID,
 			job.messageID,
@@ -159,7 +136,7 @@ func (s *DownloadService) runDownload(job downloadJob) {
 	name := filepath.Base(path)
 	if _, sendErr := job.send(workCtx, job.chatID, job.messageID, name, file); sendErr != nil {
 		s.logger.ErrorContext(workCtx, "Не удалось отправить файл YouTube", "path", path, "err", sendErr)
-		if _, replyErr := s.messenger.ReplyToChat(
+		if _, replyErr := s.tg.ReplyToChat(
 			workCtx,
 			job.chatID,
 			job.messageID,

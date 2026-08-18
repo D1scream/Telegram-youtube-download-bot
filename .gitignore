@@ -5,3 +5,5 @@ app
 .temp
 secrets/youtube_cookies.txt
 yt_downloads/
+
+.cursor/
