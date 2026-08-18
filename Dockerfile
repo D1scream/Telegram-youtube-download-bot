@@ -4,7 +4,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /bot cmd/main.go
+RUN CGO_ENABLED=0 go build -o /bot .
 
 FROM alpine:3.19
 
@@ -15,5 +15,4 @@ RUN apk add --no-cache ca-certificates tzdata ffmpeg python3 py3-pip \
 WORKDIR /app
 COPY --from=build /bot /app/bot
 
-EXPOSE 9000
 CMD ["/app/bot"]

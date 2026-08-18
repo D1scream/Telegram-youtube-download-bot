@@ -10,3 +10,4 @@ services:
       YT_DLP_COOKIES_FILE: /app/secrets/youtube_cookies.txt
     volumes:
       - ./secrets/youtube_cookies.txt:/app/secrets/youtube_cookies.txt:ro
+      - ./yt_downloads:/app/yt_downloads
