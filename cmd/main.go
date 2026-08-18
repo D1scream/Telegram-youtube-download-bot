@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/joho/godotenv"
@@ -15,7 +14,6 @@ import (
 	"telegram-bot/internal/prompt"
 	"telegram-bot/internal/transport/telegram"
 	"telegram-bot/internal/usecases/imageuk"
-	"telegram-bot/internal/usecases/music"
 	"telegram-bot/internal/usecases/youtube"
 )
 
@@ -44,11 +42,8 @@ func main() {
 	}
 
 	photoAnalyzer := newPhotoAnalyzer(cfg, telegramAdapter, logger)
-	musicService := newMusicService(cfg, telegramAdapter, logger)
-	musicUploader := newMusicUploader(cfg, musicService, telegramAdapter, logger)
-	myMusicService := music.NewMyMusicService(musicUploader, musicService, telegramAdapter, telegramAdapter, logger)
 	youtubeService := newYoutubeService(cfg, telegramAdapter, logger)
-	telegramHandler := telegram.NewHandler(photoAnalyzer, musicService, musicUploader, myMusicService, youtubeService, telegramAdapter, logger)
+	telegramHandler := telegram.NewHandler(photoAnalyzer, youtubeService, telegramAdapter, logger)
 
 	logger.Info("Telegram polling запущен")
 	if err := telegramAdapter.StartPolling(ctx, telegramHandler.HandleMessage); err != nil {
@@ -59,7 +54,7 @@ func main() {
 }
 
 func newPhotoAnalyzer(cfg *config.Config, telegramAdapter *adapters.TelegramAdapter, logger *slog.Logger) telegram.PhotoAnalyzer {
-	if strings.TrimSpace(cfg.OpenSearchURL) == "" {
+	if cfg.OpenSearchURL == "" {
 		logger.Info("Анализ изображений отключён (OPENSEARCH_URL не задан)")
 		return nil
 	}
@@ -94,41 +89,6 @@ func newPhotoAnalyzer(cfg *config.Config, telegramAdapter *adapters.TelegramAdap
 	)
 }
 
-func newMusicService(cfg *config.Config, telegramAdapter *adapters.TelegramAdapter, logger *slog.Logger) *music.SearchMusicService {
-	if strings.TrimSpace(cfg.SlskdURL) == "" {
-		logger.Info("Поиск музыки отключён (SLSKD_URL не задан)")
-		return nil
-	}
-
-	searcher := adapters.NewSlskdAdapter(cfg.SlskdURL, cfg.SlskdAPIKey)
-	logger.Info("Поиск музыки включён", "slskd_url", cfg.SlskdURL)
-	return music.NewSearchMusicService(
-		searcher,
-		searcher,
-		telegramAdapter,
-		telegramAdapter,
-		cfg.SlskdDownloadsDir,
-		[]string{cfg.SlskdDownloadsDir, cfg.SlskdMusicDir, cfg.UploadedMusicDir},
-		cfg.SlskdSearchFileLimit,
-		cfg.SlskdSearchDisplayLimit,
-		cfg.MusicAllowedFormats(),
-		logger,
-	)
-}
-
-func newMusicUploader(cfg *config.Config, musicService *music.SearchMusicService, telegramAdapter *adapters.TelegramAdapter, logger *slog.Logger) *music.UploadMusicService {
-	if musicService == nil {
-		return nil
-	}
-	return music.NewUploadMusicService(
-		telegramAdapter,
-		telegramAdapter,
-		cfg.UploadedMusicDir,
-		cfg.MusicAllowedFormats(),
-		logger,
-	)
-}
-
 func newYoutubeService(cfg *config.Config, telegramAdapter *adapters.TelegramAdapter, logger *slog.Logger) *youtube.DownloadService {
 	if !cfg.YtdlpEnabled {
 		logger.Info("YouTube /ytm /ytv отключены (YT_DLP_ENABLED=false)")
@@ -145,5 +105,5 @@ func newYoutubeService(cfg *config.Config, telegramAdapter *adapters.TelegramAda
 		return nil
 	}
 	logger.Info("YouTube /ytm /ytv включены", "cookies_file", cfg.YtdlpCookiesFile, "cookies_browser", cfg.YtdlpCookiesFromBrowser)
-	return youtube.NewDownloadService(ytdlp, telegramAdapter, telegramAdapter, logger)
+	return youtube.NewDownloadService(ytdlp, telegramAdapter, logger)
 }

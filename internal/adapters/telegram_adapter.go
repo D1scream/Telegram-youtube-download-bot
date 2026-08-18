@@ -136,38 +136,6 @@ func (t *TelegramAdapter) ReplyToChat(ctx context.Context, chatID int64, message
 	})
 }
 
-func (t *TelegramAdapter) SendDocument(ctx context.Context, chatID int64, filename string, file *os.File) (int, error) {
-	msg, err := t.bot.SendDocument(ctx, &bot.SendDocumentParams{
-		ChatID: chatID,
-		Document: &models.InputFileUpload{
-			Filename: filename,
-			Data:     file,
-		},
-	})
-	if err != nil {
-		return 0, fmt.Errorf("отправить документ Telegram: %w", err)
-	}
-	return msg.ID, nil
-}
-
-func (t *TelegramAdapter) ReplyDocument(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error) {
-	msg, err := t.bot.SendDocument(ctx, &bot.SendDocumentParams{
-		ChatID: chatID,
-		Document: &models.InputFileUpload{
-			Filename: filename,
-			Data:     file,
-		},
-		ReplyParameters: &models.ReplyParameters{
-			MessageID:                messageID,
-			AllowSendingWithoutReply: true,
-		},
-	})
-	if err != nil {
-		return 0, fmt.Errorf("отправить документ Telegram: %w", err)
-	}
-	return msg.ID, nil
-}
-
 func (t *TelegramAdapter) ReplyVideo(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error) {
 	msg, err := t.bot.SendVideo(ctx, &bot.SendVideoParams{
 		ChatID: chatID,
@@ -203,30 +171,6 @@ func (t *TelegramAdapter) ReplyAudio(ctx context.Context, chatID int64, messageI
 		return 0, fmt.Errorf("отправить аудио Telegram: %w", err)
 	}
 	return msg.ID, nil
-}
-
-func (t *TelegramAdapter) DeleteMessages(ctx context.Context, chatID int64, messageIDs []int) error {
-	var lastErr error
-	deleted := 0
-
-	for _, id := range messageIDs {
-		if id == 0 {
-			continue
-		}
-		if _, err := t.bot.DeleteMessage(ctx, &bot.DeleteMessageParams{
-			ChatID:    chatID,
-			MessageID: id,
-		}); err != nil {
-			lastErr = fmt.Errorf("удалить сообщение Telegram %d: %w", id, err)
-			continue
-		}
-		deleted++
-	}
-
-	if lastErr != nil && deleted == 0 {
-		return lastErr
-	}
-	return nil
 }
 
 func (t *TelegramAdapter) sendMessage(ctx context.Context, params *bot.SendMessageParams) (int, error) {
