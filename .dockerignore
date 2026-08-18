@@ -1,7 +1,5 @@
 .git
 .env
-docker/slskd/.env
-docker/slskd/data
 docker/opensearch
 .temp
 tmp_*
