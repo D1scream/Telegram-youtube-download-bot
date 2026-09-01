@@ -1,4 +1,4 @@
-package main
+package telegram
 
 import (
 	"context"
@@ -13,14 +13,14 @@ import (
 
 const pollTimeout = time.Minute
 
-type messageHandler func(ctx context.Context, msg *models.Message)
+type MessageHandler func(ctx context.Context, msg *models.Message)
 
 type Bot struct {
-	bot       *bot.Bot
-	onMessage messageHandler
+	client    *bot.Bot
+	onMessage MessageHandler
 }
 
-func newTelegram(token string) (*Bot, error) {
+func New(token string) (*Bot, error) {
 	t := &Bot{}
 	opts := []bot.Option{
 		bot.WithSkipGetMe(),
@@ -29,38 +29,36 @@ func newTelegram(token string) (*Bot, error) {
 			models.AllowedUpdateMessage,
 			models.AllowedUpdateChannelPost,
 		}),
-		bot.WithDefaultHandler(t.handleUpdate()),
+		bot.WithDefaultHandler(t.handleUpdate),
 	}
-	b, err := bot.New(token, opts...)
+	client, err := bot.New(token, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("создать Telegram bot: %w", err)
 	}
-	t.bot = b
+	t.client = client
 	return t, nil
 }
 
-func (t *Bot) handleUpdate() bot.HandlerFunc {
-	return func(ctx context.Context, _ *bot.Bot, update *models.Update) {
-		if t.onMessage == nil {
-			return
-		}
-		msg := update.Message
-		if msg == nil {
-			msg = update.ChannelPost
-		}
-		if msg == nil {
-			return
-		}
-		t.onMessage(ctx, msg)
+func (t *Bot) handleUpdate(ctx context.Context, _ *bot.Bot, update *models.Update) {
+	if t.onMessage == nil {
+		return
 	}
+	msg := update.Message
+	if msg == nil {
+		msg = update.ChannelPost
+	}
+	if msg == nil {
+		return
+	}
+	t.onMessage(ctx, msg)
 }
 
-func (t *Bot) Start(ctx context.Context, handler messageHandler) error {
+func (t *Bot) Start(ctx context.Context, handler MessageHandler) error {
 	t.onMessage = handler
-	if _, err := t.bot.DeleteWebhook(ctx, &bot.DeleteWebhookParams{DropPendingUpdates: true}); err != nil {
+	if _, err := t.client.DeleteWebhook(ctx, &bot.DeleteWebhookParams{DropPendingUpdates: true}); err != nil {
 		return fmt.Errorf("сбросить очередь Telegram: %w", err)
 	}
-	t.bot.Start(ctx)
+	t.client.Start(ctx)
 	return nil
 }
 
@@ -76,7 +74,7 @@ func (t *Bot) ReplyToChat(ctx context.Context, chatID int64, messageID int, mess
 }
 
 func (t *Bot) ReplyVideo(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error) {
-	msg, err := t.bot.SendVideo(ctx, &bot.SendVideoParams{
+	msg, err := t.client.SendVideo(ctx, &bot.SendVideoParams{
 		ChatID: chatID,
 		Video: &models.InputFileUpload{
 			Filename: filename,
@@ -95,7 +93,7 @@ func (t *Bot) ReplyVideo(ctx context.Context, chatID int64, messageID int, filen
 }
 
 func (t *Bot) ReplyAudio(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error) {
-	msg, err := t.bot.SendAudio(ctx, &bot.SendAudioParams{
+	msg, err := t.client.SendAudio(ctx, &bot.SendAudioParams{
 		ChatID: chatID,
 		Audio: &models.InputFileUpload{
 			Filename: filename,
@@ -113,7 +111,7 @@ func (t *Bot) ReplyAudio(ctx context.Context, chatID int64, messageID int, filen
 }
 
 func (t *Bot) sendMessage(ctx context.Context, params *bot.SendMessageParams) (int, error) {
-	msg, err := t.bot.SendMessage(ctx, params)
+	msg, err := t.client.SendMessage(ctx, params)
 	if err != nil {
 		return 0, fmt.Errorf("отправить сообщение Telegram: %w", err)
 	}
