@@ -6,15 +6,18 @@ import (
 	"strings"
 
 	"github.com/go-telegram/bot/models"
+
+	"telegram-bot/internal/telegram"
+	"telegram-bot/internal/youtube"
 )
 
 type handler struct {
-	youtube *ytService
-	tg      *Bot
+	youtube *youtube.Service
+	tg      *telegram.Bot
 	logger  *slog.Logger
 }
 
-func newHandler(yt *ytService, tg *Bot, logger *slog.Logger) *handler {
+func newHandler(yt *youtube.Service, tg *telegram.Bot, logger *slog.Logger) *handler {
 	return &handler{
 		youtube: yt,
 		tg:      tg,
@@ -22,7 +25,7 @@ func newHandler(yt *ytService, tg *Bot, logger *slog.Logger) *handler {
 	}
 }
 
-func (h *handler) HandleMessage(ctx context.Context, msg *models.Message) {
+func (h *handler) handleMessage(ctx context.Context, msg *models.Message) {
 	cmd, args, _ := strings.Cut(messageCommandLine(msg), " ")
 	switch {
 	case isCommand(cmd, "help"):
@@ -58,7 +61,7 @@ func (h *handler) handleYtm(ctx context.Context, msg *models.Message, url string
 		}
 		return
 	}
-	h.youtube.downloadMusic(ctx, msg.Chat.ID, msg.ID, url)
+	h.youtube.DownloadMusic(ctx, msg.Chat.ID, msg.ID, url)
 }
 
 func (h *handler) handleYtv(ctx context.Context, msg *models.Message, url string) {
@@ -68,7 +71,7 @@ func (h *handler) handleYtv(ctx context.Context, msg *models.Message, url string
 		}
 		return
 	}
-	h.youtube.downloadVideo(ctx, msg.Chat.ID, msg.ID, url)
+	h.youtube.DownloadVideo(ctx, msg.Chat.ID, msg.ID, url)
 }
 
 func isCommand(token, name string) bool {

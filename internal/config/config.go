@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type config struct {
+type Config struct {
 	BotToken                string `env:"BOT_TOKEN,required"`
 	YtdlpEnabled            bool   `env:"YT_DLP_ENABLED" envDefault:"false"`
 	YtdlpPath               string `env:"YT_DLP_PATH" envDefault:"yt-dlp"`
@@ -18,13 +18,13 @@ type config struct {
 	YtdlpCookiesFromBrowser string `env:"YT_DLP_COOKIES_FROM_BROWSER"`
 }
 
-func loadConfig() (config, error) {
+func Load() (Config, error) {
 	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return config{}, fmt.Errorf("загрузка .env: %w", err)
+		return Config{}, fmt.Errorf("загрузка .env: %w", err)
 	}
-	cfg, err := env.ParseAs[config]()
+	cfg, err := env.ParseAs[Config]()
 	if err != nil {
-		return config{}, fmt.Errorf("разбор конфигурации: %w", err)
+		return Config{}, fmt.Errorf("разбор конфигурации: %w", err)
 	}
 	return cfg, nil
 }

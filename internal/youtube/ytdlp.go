@@ -1,4 +1,4 @@
-package main
+package youtube
 
 import (
 	"bytes"
@@ -21,12 +21,12 @@ type ytdlp struct {
 	outputDir      string
 }
 
-func newYtdlp(cfg config) (*ytdlp, error) {
-	bin, err := resolveYtdlpBin(cfg.YtdlpPath)
+func newYtdlp(cfg Config) (*ytdlp, error) {
+	bin, err := resolveYtdlpBin(cfg.Bin)
 	if err != nil {
 		return nil, err
 	}
-	outDir := strings.TrimSpace(cfg.YtdlpDownloadDir)
+	outDir := strings.TrimSpace(cfg.DownloadDir)
 	if outDir == "" {
 		outDir = "yt_downloads"
 	}
@@ -35,8 +35,8 @@ func newYtdlp(cfg config) (*ytdlp, error) {
 	}
 	return &ytdlp{
 		bin:            bin,
-		cookiesFile:    cfg.YtdlpCookiesFile,
-		cookiesBrowser: cfg.YtdlpCookiesFromBrowser,
+		cookiesFile:    cfg.CookiesFile,
+		cookiesBrowser: cfg.CookiesBrowser,
 		outputDir:      outDir,
 	}, nil
 }
@@ -46,7 +46,7 @@ func resolveYtdlpBin(bin string) (string, error) {
 	if bin == "" {
 		bin = "yt-dlp"
 	}
-	if strings.Contains(bin, "/") {
+	if looksLikePath(bin) {
 		if _, err := os.Stat(bin); err == nil {
 			return bin, nil
 		}
@@ -62,6 +62,10 @@ func resolveYtdlpBin(bin string) (string, error) {
 	return path, nil
 }
 
+func looksLikePath(bin string) bool {
+	return filepath.IsAbs(bin) || strings.ContainsAny(bin, `/\`)
+}
+
 func (y *ytdlp) downloadAudio(ctx context.Context, pageURL string) (string, error) {
 	return y.download(ctx, pageURL, "bestaudio", "%(title)s [audio].%(ext)s", "")
 }
@@ -75,6 +79,12 @@ func (y *ytdlp) download(ctx context.Context, pageURL, format, outputTemplate, m
 	if err != nil {
 		return "", err
 	}
+	keep := false
+	defer func() {
+		if !keep {
+			os.RemoveAll(workDir)
+		}
+	}()
 
 	outPattern := filepath.Join(workDir, outputTemplate)
 	args := []string{
@@ -87,9 +97,11 @@ func (y *ytdlp) download(ctx context.Context, pageURL, format, outputTemplate, m
 	if mergeFormat != "" {
 		args = append(args, "--merge-output-format", mergeFormat)
 	}
-	if err := y.appendCookieArgs(&args, workDir); err != nil {
+	cookieArgs, err := y.cookieArgs(workDir)
+	if err != nil {
 		return "", err
 	}
+	args = append(args, cookieArgs...)
 	args = append(args, pageURL)
 
 	ctx, cancel := context.WithTimeout(ctx, ytdlpDownloadTimeout)
@@ -103,9 +115,9 @@ func (y *ytdlp) download(ctx context.Context, pageURL, format, outputTemplate, m
 	if err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
-			msg = err.Error()
+			return "", fmt.Errorf("yt-dlp: %w", err)
 		}
-		return "", fmt.Errorf("yt-dlp: %s", msg)
+		return "", fmt.Errorf("yt-dlp: %s: %w", msg, err)
 	}
 
 	path := lastNonEmptyLine(string(out))
@@ -115,24 +127,24 @@ func (y *ytdlp) download(ctx context.Context, pageURL, format, outputTemplate, m
 	if _, err := os.Stat(path); err != nil {
 		return "", fmt.Errorf("yt-dlp: файл не найден: %w", err)
 	}
+	keep = true
 	return path, nil
 }
 
-func (y *ytdlp) appendCookieArgs(args *[]string, workDir string) error {
+func (y *ytdlp) cookieArgs(workDir string) ([]string, error) {
 	if file := strings.TrimSpace(y.cookiesFile); file != "" {
 		if _, err := os.Stat(file); err == nil {
 			writable := filepath.Join(workDir, "cookies.txt")
 			if err := copyFile(file, writable); err != nil {
-				return fmt.Errorf("скопировать cookies: %w", err)
+				return nil, fmt.Errorf("скопировать cookies: %w", err)
 			}
-			*args = append(*args, "--cookies", writable)
-			return nil
+			return []string{"--cookies", writable}, nil
 		}
 	}
 	if browser := strings.TrimSpace(y.cookiesBrowser); browser != "" {
-		*args = append(*args, "--cookies-from-browser", browser)
+		return []string{"--cookies-from-browser", browser}, nil
 	}
-	return nil
+	return nil, nil
 }
 
 func lastNonEmptyLine(s string) string {
