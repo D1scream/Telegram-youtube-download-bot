@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"telegram-bot/internal/config"
+	"telegram-bot/internal/souchastnik"
 	"telegram-bot/internal/telegram"
 	"telegram-bot/internal/youtube"
 )
@@ -33,11 +34,24 @@ func main() {
 	}
 
 	logger.Info("Telegram polling запущен")
-	if err := tg.Start(ctx, newHandler(newYouTube(cfg, tg, logger), tg, logger).handleMessage); err != nil {
+	checker := newSouchastnik(cfg, logger)
+	if err := tg.Start(ctx, newHandler(newYouTube(cfg, tg, logger), checker, tg, logger).handleMessage); err != nil {
 		logger.Error("Telegram polling завершился с ошибкой", "err", err)
 		os.Exit(1)
 	}
 	logger.Info("Сервер остановлен")
+}
+
+func newSouchastnik(cfg config.Config, logger *slog.Logger) *souchastnik.Client {
+	if cfg.SouchastnikURL == "" {
+		logger.Info("Проверка текста отключена (SOUCHASTNIK_URL не задан)")
+		return nil
+	}
+	logger.Info("Проверка текста включена", "url", cfg.SouchastnikURL)
+	return souchastnik.New(souchastnik.Config{
+		URL:            cfg.SouchastnikURL,
+		TimeoutSeconds: cfg.SouchastnikTimeout,
+	})
 }
 
 func newYouTube(cfg config.Config, tg *telegram.Bot, logger *slog.Logger) *youtube.Service {

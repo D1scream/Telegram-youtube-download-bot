@@ -8,18 +8,21 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"telegram-bot/internal/telegram"
+	"telegram-bot/internal/souchastnik"
 	"telegram-bot/internal/youtube"
 )
 
 type handler struct {
 	youtube *youtube.Service
+	checker *souchastnik.Client
 	tg      *telegram.Bot
 	logger  *slog.Logger
 }
 
-func newHandler(yt *youtube.Service, tg *telegram.Bot, logger *slog.Logger) *handler {
+func newHandler(yt *youtube.Service, checker *souchastnik.Client, tg *telegram.Bot, logger *slog.Logger) *handler {
 	return &handler{
 		youtube: yt,
+		checker: checker,
 		tg:      tg,
 		logger:  logger.With("component", "telegram_handler"),
 	}
@@ -34,6 +37,8 @@ func (h *handler) handleMessage(ctx context.Context, msg *models.Message) {
 		h.handleYtm(ctx, msg, args)
 	case isCommand(cmd, "ytv"):
 		h.handleYtv(ctx, msg, args)
+	case isCommand(cmd, "check"):
+		h.handleCheck(ctx, msg, args)
 	}
 }
 
@@ -46,11 +51,41 @@ func messageCommandLine(msg *models.Message) string {
 
 const helpMessage = `Команды
 /ytm <URL> - аудио с YouTube
-/ytv <URL> - видео с YouTube`
+/ytv <URL> - видео с YouTube
+/check <текст> - проверка текста`
 
 func (h *handler) handleHelp(ctx context.Context, msg *models.Message) {
 	if _, err := h.tg.ReplyToChat(ctx, msg.Chat.ID, msg.ID, helpMessage); err != nil {
 		h.logger.ErrorContext(ctx, "Не удалось отправить /help", "err", err)
+	}
+}
+
+func (h *handler) handleCheck(ctx context.Context, msg *models.Message, text string) {
+	if h.checker == nil {
+		h.reply(ctx, msg, "Проверка текста недоступна (SOUCHASTNIK_URL не настроен)")
+		return
+	}
+	if strings.TrimSpace(text) == "" {
+		h.reply(ctx, msg, "Использование: /check <текст>")
+		return
+	}
+
+	result, err := h.checker.Check(ctx, text)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "Не удалось проверить текст", "err", err)
+		h.reply(ctx, msg, "Не удалось проверить текст")
+		return
+	}
+	if result.Code == "none" {
+		h.reply(ctx, msg, "Состав не обнаружен")
+		return
+	}
+	h.reply(ctx, msg, "Возможная статья: "+result.Code)
+}
+
+func (h *handler) reply(ctx context.Context, msg *models.Message, text string) {
+	if _, err := h.tg.ReplyToChat(ctx, msg.Chat.ID, msg.ID, text); err != nil {
+		h.logger.ErrorContext(ctx, "Не удалось отправить ответ", "err", err)
 	}
 }
 
