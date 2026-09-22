@@ -1,7 +1,5 @@
 # Telegram Bot
 
-[Русский](README.ru.md)
-
 YouTube downloads: `/ytm` audio, `/ytv` video. Optional text checking via a local `souchastnik` inference service.
 
 ```bash
