@@ -11,3 +11,37 @@ services:
     volumes:
       - ./secrets/youtube_cookies.txt:/app/secrets/youtube_cookies.txt:ro
       - ./yt_downloads:/app/yt_downloads
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: souchastnik-llama
+    restart: unless-stopped
+    cpus: 2
+    command: ["-m", "/models/model.gguf", "--host", "0.0.0.0", "--port", "8080", "-c", "4096", "-t", "2", "--parallel", "1", "--reasoning", "off"]
+    volumes:
+      - ./souchastnik/model:/models:ro
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: souchastnik-tailscale
+    hostname: souchastnik
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+    volumes:
+      - ./tailscale:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+  souchastnik:
+    build: ./souchastnik
+    container_name: souchastnik
+    restart: unless-stopped
+    network_mode: service:tailscale
+    environment:
+      LLAMA_URL: http://llama:8080/completion
+      MIN_CONFIDENCE: "0.7"
+    depends_on:
+      - llama
+      - tailscale

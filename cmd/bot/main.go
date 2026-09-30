@@ -9,7 +9,7 @@ import (
 
 	"telegram-bot/internal/config"
 	"telegram-bot/internal/souchastnik"
-	"telegram-bot/internal/telegram"
+	"telegram-bot/internal/transport/telegram"
 	"telegram-bot/internal/youtube"
 )
 
@@ -35,7 +35,7 @@ func main() {
 
 	logger.Info("Telegram polling запущен")
 	checker := newSouchastnik(cfg, logger)
-	if err := tg.Start(ctx, newHandler(newYouTube(cfg, tg, logger), checker, tg, logger).handleMessage); err != nil {
+	if err := tg.Start(ctx, telegram.NewHandler(newYouTube(cfg, tg, logger), checker, tg, logger).HandleMessage); err != nil {
 		logger.Error("Telegram polling завершился с ошибкой", "err", err)
 		os.Exit(1)
 	}
