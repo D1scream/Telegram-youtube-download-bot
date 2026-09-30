@@ -1,4 +1,4 @@
-package main
+package telegram
 
 import (
 	"context"
@@ -7,28 +7,29 @@ import (
 
 	"github.com/go-telegram/bot/models"
 
-	"telegram-bot/internal/telegram"
 	"telegram-bot/internal/souchastnik"
 	"telegram-bot/internal/youtube"
 )
 
-type handler struct {
+type Handler struct {
 	youtube *youtube.Service
 	checker *souchastnik.Client
-	tg      *telegram.Bot
+	tg      *Bot
+	history *history
 	logger  *slog.Logger
 }
 
-func newHandler(yt *youtube.Service, checker *souchastnik.Client, tg *telegram.Bot, logger *slog.Logger) *handler {
-	return &handler{
+func NewHandler(yt *youtube.Service, checker *souchastnik.Client, tg *Bot, logger *slog.Logger) *Handler {
+	return &Handler{
 		youtube: yt,
 		checker: checker,
 		tg:      tg,
+		history: newHistory(),
 		logger:  logger.With("component", "telegram_handler"),
 	}
 }
 
-func (h *handler) handleMessage(ctx context.Context, msg *models.Message) {
+func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 	cmd, args, _ := strings.Cut(messageCommandLine(msg), " ")
 	switch {
 	case isCommand(cmd, "help"):
@@ -39,6 +40,8 @@ func (h *handler) handleMessage(ctx context.Context, msg *models.Message) {
 		h.handleYtv(ctx, msg, args)
 	case isCommand(cmd, "check"):
 		h.handleCheck(ctx, msg, args)
+	default:
+		h.handlePassiveCheck(ctx, msg, messageCommandLine(msg))
 	}
 }
 
@@ -54,13 +57,13 @@ const helpMessage = `Команды
 /ytv <URL> - видео с YouTube
 /check <текст> - проверка текста`
 
-func (h *handler) handleHelp(ctx context.Context, msg *models.Message) {
+func (h *Handler) handleHelp(ctx context.Context, msg *models.Message) {
 	if _, err := h.tg.ReplyToChat(ctx, msg.Chat.ID, msg.ID, helpMessage); err != nil {
 		h.logger.ErrorContext(ctx, "Не удалось отправить /help", "err", err)
 	}
 }
 
-func (h *handler) handleCheck(ctx context.Context, msg *models.Message, text string) {
+func (h *Handler) handleCheck(ctx context.Context, msg *models.Message, text string) {
 	if h.checker == nil {
 		h.reply(ctx, msg, "Проверка текста недоступна (SOUCHASTNIK_URL не настроен)")
 		return
@@ -70,7 +73,7 @@ func (h *handler) handleCheck(ctx context.Context, msg *models.Message, text str
 		return
 	}
 
-	result, err := h.checker.Check(ctx, text)
+	result, err := h.checker.Check(ctx, text, nil)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "Не удалось проверить текст", "err", err)
 		h.reply(ctx, msg, "Не удалось проверить текст")
@@ -80,16 +83,58 @@ func (h *handler) handleCheck(ctx context.Context, msg *models.Message, text str
 		h.reply(ctx, msg, "Состав не обнаружен")
 		return
 	}
-	h.reply(ctx, msg, "Возможная статья: "+result.Code)
+	h.logViolation(ctx, msg, text, result)
+	h.reply(ctx, msg, violationMessage(result))
 }
 
-func (h *handler) reply(ctx context.Context, msg *models.Message, text string) {
+func (h *Handler) handlePassiveCheck(ctx context.Context, msg *models.Message, text string) {
+	if h.checker == nil || text == "" {
+		return
+	}
+
+	previous := h.history.add(msg.Chat.ID, historyLine(msg, text))
+	result, err := h.checker.Check(ctx, text, previous)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "Не удалось проверить входящее сообщение", "err", err)
+		return
+	}
+	if result.Code != "none" {
+		h.logViolation(ctx, msg, text, result)
+		h.reply(ctx, msg, violationMessage(result))
+	}
+}
+
+func (h *Handler) logViolation(ctx context.Context, msg *models.Message, text string, result souchastnik.Result) {
+	var fromID int64
+	var fromUsername string
+	if msg.From != nil {
+		fromID = msg.From.ID
+		fromUsername = msg.From.Username
+	}
+	h.logger.InfoContext(ctx, "Сработала проверка текста",
+		"chat_id", msg.Chat.ID,
+		"message_id", msg.ID,
+		"from_id", fromID,
+		"from_username", fromUsername,
+		"code", result.Code,
+		"text", text,
+	)
+}
+
+func violationMessage(result souchastnik.Result) string {
+	if result.Description == "" {
+		return "Возможная статья: " + result.Code
+	}
+	return result.Description
+}
+
+func (h *Handler) reply(ctx context.Context, msg *models.Message, text string) {
 	if _, err := h.tg.ReplyToChat(ctx, msg.Chat.ID, msg.ID, text); err != nil {
 		h.logger.ErrorContext(ctx, "Не удалось отправить ответ", "err", err)
 	}
 }
 
-func (h *handler) handleYtm(ctx context.Context, msg *models.Message, url string) {
+func (h *Handler) handleYtm(ctx context.Context, msg *models.Message, url string) {
 	if h.youtube == nil {
 		if _, err := h.tg.ReplyToChat(ctx, msg.Chat.ID, msg.ID, "YouTube недоступен (yt-dlp не настроен)"); err != nil {
 			h.logger.ErrorContext(ctx, "Не удалось отправить ответ ytm", "err", err)
@@ -99,7 +144,7 @@ func (h *handler) handleYtm(ctx context.Context, msg *models.Message, url string
 	h.youtube.DownloadMusic(ctx, msg.Chat.ID, msg.ID, url)
 }
 
-func (h *handler) handleYtv(ctx context.Context, msg *models.Message, url string) {
+func (h *Handler) handleYtv(ctx context.Context, msg *models.Message, url string) {
 	if h.youtube == nil {
 		if _, err := h.tg.ReplyToChat(ctx, msg.Chat.ID, msg.ID, "YouTube недоступен (yt-dlp не настроен)"); err != nil {
 			h.logger.ErrorContext(ctx, "Не удалось отправить ответ ytv", "err", err)

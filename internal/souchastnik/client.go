@@ -16,7 +16,13 @@ type Config struct {
 }
 
 type Result struct {
-	Code string `json:"code"`
+	Code        string `json:"code"`
+	Description string `json:"description"`
+}
+
+type request struct {
+	Text    string   `json:"text"`
+	Context []string `json:"context,omitempty"`
 }
 
 type Client struct {
@@ -35,8 +41,8 @@ func New(cfg Config) *Client {
 	}
 }
 
-func (c *Client) Check(ctx context.Context, text string) (Result, error) {
-	body, err := json.Marshal(map[string]string{"text": text})
+func (c *Client) Check(ctx context.Context, text string, previous []string) (Result, error) {
+	body, err := json.Marshal(request{Text: text, Context: previous})
 	if err != nil {
 		return Result{}, err
 	}

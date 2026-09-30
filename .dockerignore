@@ -1,8 +1,6 @@
 .git
 .env
-.temp
-tmp_*
-bot-linux
-coverage.out
-**/.cache
 yt_downloads
+secrets
+souchastnik
+tailscale

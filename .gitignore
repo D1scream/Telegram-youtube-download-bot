@@ -1,9 +1,7 @@
 .env
-.idea
-scripts
-app
-.temp
 secrets/youtube_cookies.txt
+secrets/creds.txt
 yt_downloads/
-
 .cursor/
+souchastnik/model/
+souchastnik/original/
