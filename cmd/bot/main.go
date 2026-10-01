@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"telegram-bot/internal/config"
+	"telegram-bot/internal/chess"
 	"telegram-bot/internal/imposter"
 	"telegram-bot/internal/souchastnik"
 	"telegram-bot/internal/transport/telegram"
@@ -47,7 +48,12 @@ func main() {
 		logger.Error("Ошибка загрузки состояния игры", "err", err)
 		os.Exit(1)
 	}
-	handler := telegram.NewHandler(newYouTube(cfg, tg, logger), checker, tg, bank, store, logger)
+	chessStore, err := chess.OpenStore(cfg.ChessStateFile)
+	if err != nil {
+		logger.Error("Ошибка загрузки состояния шахмат", "err", err)
+		os.Exit(1)
+	}
+	handler := telegram.NewHandler(newYouTube(cfg, tg, logger), checker, tg, bank, store, chessStore, logger)
 	if err := tg.Start(ctx, handler.HandleMessage, handler.HandleCallback); err != nil {
 		logger.Error("Telegram polling завершился с ошибкой", "err", err)
 		os.Exit(1)
