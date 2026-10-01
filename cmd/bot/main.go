@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"telegram-bot/internal/config"
+	"telegram-bot/internal/imposter"
 	"telegram-bot/internal/souchastnik"
 	"telegram-bot/internal/transport/telegram"
 	"telegram-bot/internal/youtube"
@@ -33,9 +34,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	bank, err := newWordList(cfg, logger)
+	if err != nil {
+		logger.Error("Ошибка загрузки банка слов", "err", err)
+		os.Exit(1)
+	}
+
 	logger.Info("Telegram polling запущен")
 	checker := newSouchastnik(cfg, logger)
-	if err := tg.Start(ctx, telegram.NewHandler(newYouTube(cfg, tg, logger), checker, tg, logger).HandleMessage); err != nil {
+	store, err := imposter.OpenStore(cfg.ImposterStateFile)
+	if err != nil {
+		logger.Error("Ошибка загрузки состояния игры", "err", err)
+		os.Exit(1)
+	}
+	handler := telegram.NewHandler(newYouTube(cfg, tg, logger), checker, tg, bank, store, logger)
+	if err := tg.Start(ctx, handler.HandleMessage, handler.HandleCallback); err != nil {
 		logger.Error("Telegram polling завершился с ошибкой", "err", err)
 		os.Exit(1)
 	}
@@ -71,4 +84,13 @@ func newYouTube(cfg config.Config, tg *telegram.Bot, logger *slog.Logger) *youtu
 	}
 	logger.Info("YouTube /ytm /ytv включены", "cookies_file", cfg.YtdlpCookiesFile, "cookies_browser", cfg.YtdlpCookiesFromBrowser)
 	return yt
+}
+
+func newWordList(cfg config.Config, logger *slog.Logger) (*imposter.WordList, error) {
+	words, err := imposter.LoadWordList(cfg.WordsDownloadedFile)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("Банк слов загружен", "words", words.Len())
+	return words, nil
 }
