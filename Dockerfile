@@ -14,5 +14,6 @@ RUN apk add --no-cache ca-certificates tzdata ffmpeg python3 py3-pip \
 
 WORKDIR /app
 COPY --from=build /bot /app/bot
+COPY words_downloaded.txt /app/
 
 CMD ["/app/bot"]

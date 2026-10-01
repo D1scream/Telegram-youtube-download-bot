@@ -5,3 +5,5 @@ yt_downloads/
 .cursor/
 souchastnik/model/
 souchastnik/original/
+data/
+deploy.sh

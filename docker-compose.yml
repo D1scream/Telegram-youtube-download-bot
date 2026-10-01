@@ -11,6 +11,7 @@ services:
     volumes:
       - ./secrets/youtube_cookies.txt:/app/secrets/youtube_cookies.txt:ro
       - ./yt_downloads:/app/yt_downloads
+      - ./data:/app/data
   llama:
     image: ghcr.io/ggml-org/llama.cpp:server
     container_name: souchastnik-llama

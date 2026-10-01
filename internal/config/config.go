@@ -18,6 +18,8 @@ type Config struct {
 	YtdlpDownloadDir        string `env:"YT_DLP_DOWNLOAD_DIR" envDefault:"yt_downloads"`
 	YtdlpCookiesFile        string `env:"YT_DLP_COOKIES_FILE"`
 	YtdlpCookiesFromBrowser string `env:"YT_DLP_COOKIES_FROM_BROWSER"`
+	ImposterStateFile       string `env:"IMPOSTER_STATE_FILE" envDefault:"data/imposter.json"`
+	WordsDownloadedFile     string `env:"WORDS_DOWNLOADED_FILE" envDefault:"words_downloaded.txt"`
 }
 
 func Load() (Config, error) {

@@ -7,26 +7,33 @@ import (
 
 	"github.com/go-telegram/bot/models"
 
+	"telegram-bot/internal/imposter"
 	"telegram-bot/internal/souchastnik"
 	"telegram-bot/internal/youtube"
 )
 
 type Handler struct {
-	youtube *youtube.Service
-	checker *souchastnik.Client
-	tg      *Bot
-	history *history
-	logger  *slog.Logger
+	youtube  *youtube.Service
+	checker  *souchastnik.Client
+	tg       *Bot
+	imposter *imposterController
+	history  *history
+	logger   *slog.Logger
 }
 
-func NewHandler(yt *youtube.Service, checker *souchastnik.Client, tg *Bot, logger *slog.Logger) *Handler {
+func NewHandler(yt *youtube.Service, checker *souchastnik.Client, tg *Bot, bank *imposter.WordList, store *imposter.Store, logger *slog.Logger) *Handler {
 	return &Handler{
-		youtube: yt,
-		checker: checker,
-		tg:      tg,
-		history: newHistory(),
-		logger:  logger.With("component", "telegram_handler"),
+		youtube:  yt,
+		checker:  checker,
+		tg:       tg,
+		imposter: newImposterController(tg, bank, store, logger),
+		history:  newHistory(),
+		logger:   logger.With("component", "telegram_handler"),
 	}
+}
+
+func (h *Handler) HandleCallback(ctx context.Context, query *models.CallbackQuery) {
+	h.imposter.handleCallback(ctx, query)
 }
 
 func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
@@ -40,6 +47,18 @@ func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 		h.handleYtv(ctx, msg, args)
 	case isCommand(cmd, "check"):
 		h.handleCheck(ctx, msg, args)
+	case isCommand(cmd, "start"):
+		h.handleStart(ctx, msg)
+	case isCommand(cmd, "imposter"):
+		h.imposter.handleCommand(ctx, msg, "imposter")
+	case isCommand(cmd, "imposter_settings"):
+		h.imposter.handleCommand(ctx, msg, "imposter_settings")
+	case isCommand(cmd, "imposter_stop"):
+		h.imposter.handleCommand(ctx, msg, "imposter_stop")
+	case isCommand(cmd, "topic"):
+		h.imposter.handleTopic(ctx, msg, args)
+	case isCommand(cmd, "word"):
+		h.imposter.handleWord(ctx, msg, args)
 	default:
 		h.handlePassiveCheck(ctx, msg, messageCommandLine(msg))
 	}
@@ -55,12 +74,20 @@ func messageCommandLine(msg *models.Message) string {
 const helpMessage = `Команды
 /ytm <URL> - аудио с YouTube
 /ytv <URL> - видео с YouTube
-/check <текст> - проверка текста`
+/check <текст> - проверка текста
+/imposter - игра "Импостер". Команды /imposter_settings, /imposter_stop, /word`
 
 func (h *Handler) handleHelp(ctx context.Context, msg *models.Message) {
 	if _, err := h.tg.ReplyToChat(ctx, msg.Chat.ID, msg.ID, helpMessage); err != nil {
 		h.logger.ErrorContext(ctx, "Не удалось отправить /help", "err", err)
 	}
+}
+
+func (h *Handler) handleStart(ctx context.Context, msg *models.Message) {
+	if msg.Chat.Type != models.ChatTypePrivate {
+		return
+	}
+	h.reply(ctx, msg, "Вы зарегистрированы для игры в \"Импостер\".\n\n"+imposterHelp)
 }
 
 func (h *Handler) handleCheck(ctx context.Context, msg *models.Message, text string) {
