@@ -168,3 +168,28 @@ func (t *Bot) sendMessage(ctx context.Context, params *bot.SendMessageParams) (i
 	}
 	return msg.ID, nil
 }
+
+// SendRich отправляет rich-сообщение (Bot API 10.1+) из HTML. Кнопки могут быть внутри html (tg-button) или в markup.
+func (t *Bot) SendRich(ctx context.Context, chatID int64, richHTML string, markup *models.InlineKeyboardMarkup) (int, error) {
+	params := &bot.SendRichMessageParams{ChatID: chatID, RichMessage: models.InputRichMessage{HTML: richHTML}}
+	if markup != nil {
+		params.ReplyMarkup = markup
+	}
+	msg, err := t.client.SendRichMessage(ctx, params)
+	if err != nil {
+		return 0, fmt.Errorf("отправить rich-сообщение Telegram: %w", err)
+	}
+	return msg.ID, nil
+}
+
+// EditRich заменяет rich-сообщение целиком.
+func (t *Bot) EditRich(ctx context.Context, chatID int64, messageID int, richHTML string, markup *models.InlineKeyboardMarkup) error {
+	params := &bot.EditMessageTextParams{ChatID: chatID, MessageID: messageID, RichMessage: &models.InputRichMessage{HTML: richHTML}}
+	if markup != nil {
+		params.ReplyMarkup = markup
+	}
+	if _, err := t.client.EditMessageText(ctx, params); err != nil && !strings.Contains(err.Error(), "message is not modified") {
+		return fmt.Errorf("изменить rich-сообщение Telegram: %w", err)
+	}
+	return nil
+}

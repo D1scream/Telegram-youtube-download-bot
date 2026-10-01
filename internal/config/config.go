@@ -19,6 +19,7 @@ type Config struct {
 	YtdlpCookiesFile        string `env:"YT_DLP_COOKIES_FILE"`
 	YtdlpCookiesFromBrowser string `env:"YT_DLP_COOKIES_FROM_BROWSER"`
 	ImposterStateFile       string `env:"IMPOSTER_STATE_FILE" envDefault:"data/imposter.json"`
+	ChessStateFile          string `env:"CHESS_STATE_FILE" envDefault:"data/chess.json"`
 	WordsDownloadedFile     string `env:"WORDS_DOWNLOADED_FILE" envDefault:"words_downloaded.txt"`
 }
 

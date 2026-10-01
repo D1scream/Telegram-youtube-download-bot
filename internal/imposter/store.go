@@ -252,16 +252,3 @@ func (s *Store) DeleteTopic(chatID int64, name string) error {
 	delete(c.Topics, key)
 	return s.save()
 }
-
-// ParseWords разбирает слова, разделённые пробелами, запятыми, точками с запятой или переносами строк.
-// Некорректные слова пропускаются, повторы убираются.
-func ParseWords(text string) []string {
-	fields := strings.FieldsFunc(text, func(r rune) bool { return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\r' || r == '\t' })
-	var words []string
-	for _, f := range fields {
-		if w, ok := CleanWord(f); ok && !slices.Contains(words, w) {
-			words = append(words, w)
-		}
-	}
-	return words
-}

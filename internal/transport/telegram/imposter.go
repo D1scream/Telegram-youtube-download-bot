@@ -135,12 +135,16 @@ func (c *imposterController) stop(ctx context.Context, msg *models.Message) {
 
 const topicUsage = `Темы (свои списки слов для игры в этом чате)
 /topic - список тем
-/topic add Название: слово, слово - создать тему или добавить слова
-/topic del Название - удалить тему
-/topic del Название: слово, слово - убрать слова из темы
-Изменять темы могут админы чата. Выбрать тему: /imposter_settings, кнопка «Слова»`
+/topic show Название - слова темы
+/topic add Название: слово - добавить одно слово (тема создаётся сама)
+/topic remove Название: слово - убрать одно слово
+/topic delete Название - удалить тему целиком
+Изменять темы могут админы чата. Выбрать тему: /imposter_settings, кнопка "Слова"`
 
-// handleTopic управляет темами чата: /topic [add|del] ...
+// maxTopicShowRunes ограничивает вывод /topic show: сообщение Telegram не длиннее 4096 символов.
+const maxTopicShowRunes = 3500
+
+// handleTopic управляет темами чата: /topic [show|add|remove|delete] ...
 func (c *imposterController) handleTopic(ctx context.Context, msg *models.Message, args string) {
 	if msg.From == nil {
 		return
@@ -156,22 +160,15 @@ func (c *imposterController) handleTopic(ctx context.Context, msg *models.Messag
 	action, rest, _ := strings.Cut(strings.TrimSpace(args), " ")
 	action = strings.ToLower(action)
 
-	if action == "" || action == "list" {
-		names := c.store.TopicNames(chatID)
-		if len(names) == 0 {
-			c.reply(ctx, msg, "Тем пока нет.\n\n"+topicUsage)
-			return
-		}
-		var b strings.Builder
-		b.WriteString("Темы чата:\n")
-		for _, name := range names {
-			words, _ := c.store.TopicWords(chatID, name)
-			fmt.Fprintf(&b, "- %s (слов: %d)\n", name, len(words))
-		}
-		c.reply(ctx, msg, b.String()+"\n"+topicUsage)
+	switch action {
+	case "", "list":
+		c.topicList(ctx, msg)
 		return
-	}
-	if action != "add" && action != "del" {
+	case "show":
+		c.topicShow(ctx, msg, strings.TrimSpace(rest))
+		return
+	case "add", "remove", "delete":
+	default:
 		c.reply(ctx, msg, topicUsage)
 		return
 	}
@@ -180,37 +177,76 @@ func (c *imposterController) handleTopic(ctx context.Context, msg *models.Messag
 		return
 	}
 
-	name, wordsText, hasWords := strings.Cut(rest, ":")
+	name, wordText, hasWord := strings.Cut(rest, ":")
 	name = strings.TrimSpace(name)
-	words := imposter.ParseWords(wordsText)
-	switch {
-	case name == "":
+	if name == "" {
 		c.reply(ctx, msg, topicUsage)
-	case action == "add":
-		if !hasWords || len(words) == 0 {
-			c.reply(ctx, msg, "Укажите слова после двоеточия: /topic add Название: слово, слово")
-			return
-		}
-		added, err := c.store.AddTopicWords(chatID, name, words)
-		if err != nil {
-			c.reply(ctx, msg, "Не получилось: "+err.Error())
-			return
-		}
-		c.reply(ctx, msg, fmt.Sprintf("Тема «%s»: добавлено слов %d из %d", name, added, len(words)))
-	case hasWords:
-		removed, err := c.store.RemoveTopicWords(chatID, name, words)
-		if err != nil {
-			c.reply(ctx, msg, "Не получилось: "+err.Error())
-			return
-		}
-		c.reply(ctx, msg, fmt.Sprintf("Тема «%s»: убрано слов %d", name, removed))
-	default:
+		return
+	}
+	if action == "delete" {
 		if err := c.store.DeleteTopic(chatID, name); err != nil {
 			c.reply(ctx, msg, "Не получилось: "+err.Error())
 			return
 		}
-		c.reply(ctx, msg, fmt.Sprintf("Тема «%s» удалена", name))
+		c.reply(ctx, msg, fmt.Sprintf("Тема \"%s\" удалена", name))
+		return
 	}
+
+	word, ok := imposter.CleanWord(wordText)
+	if !hasWord || !ok {
+		c.reply(ctx, msg, fmt.Sprintf("Нужно ровно одно слово после двоеточия: /topic %s Название: слово", action))
+		return
+	}
+	if action == "add" {
+		added, err := c.store.AddTopicWords(chatID, name, []string{word})
+		switch {
+		case err != nil:
+			c.reply(ctx, msg, "Не получилось: "+err.Error())
+		case added == 0:
+			c.reply(ctx, msg, fmt.Sprintf("Слово \"%s\" уже есть в теме \"%s\"", word, name))
+		default:
+			c.reply(ctx, msg, fmt.Sprintf("Слово \"%s\" добавлено в тему \"%s\"", word, name))
+		}
+		return
+	}
+	removed, err := c.store.RemoveTopicWords(chatID, name, []string{word})
+	switch {
+	case err != nil:
+		c.reply(ctx, msg, "Не получилось: "+err.Error())
+	case removed == 0:
+		c.reply(ctx, msg, fmt.Sprintf("Слова \"%s\" нет в теме \"%s\"", word, name))
+	default:
+		c.reply(ctx, msg, fmt.Sprintf("Слово \"%s\" убрано из темы \"%s\"", word, name))
+	}
+}
+
+func (c *imposterController) topicList(ctx context.Context, msg *models.Message) {
+	names := c.store.TopicNames(msg.Chat.ID)
+	if len(names) == 0 {
+		c.reply(ctx, msg, "Тем пока нет.\n\n"+topicUsage)
+		return
+	}
+	var b strings.Builder
+	b.WriteString("Темы чата:\n")
+	for _, name := range names {
+		words, _ := c.store.TopicWords(msg.Chat.ID, name)
+		fmt.Fprintf(&b, "- %s (слов: %d)\n", name, len(words))
+	}
+	c.reply(ctx, msg, b.String()+"\n"+topicUsage)
+}
+
+func (c *imposterController) topicShow(ctx context.Context, msg *models.Message, name string) {
+	words, ok := c.store.TopicWords(msg.Chat.ID, name)
+	if !ok {
+		c.reply(ctx, msg, imposter.ErrNoTopic.Error())
+		return
+	}
+	slices.Sort(words)
+	text := strings.Join(words, ", ")
+	if runes := []rune(text); len(runes) > maxTopicShowRunes {
+		text = string(runes[:maxTopicShowRunes]) + "..."
+	}
+	c.reply(ctx, msg, fmt.Sprintf("Тема \"%s\", слов: %d\n%s", name, len(words), text))
 }
 
 // handleWord принимает /word: подсказку в фазе подсказок или догадку пойманного импостера.
@@ -391,8 +427,8 @@ func (c *imposterController) startGame(ctx context.Context, chatID int64, cg *ch
 		return fmt.Sprintf("Нужно минимум %d игрока", imposter.MinPlayers)
 	}
 	if g.Settings.Master {
-		prompt := "Вы Мастер в игре «Импостер» в чате «" + html.EscapeString(cg.title) +
-			"». Пришлите сюда загаданное слово командой /word &lt;слово&gt;. Команда /word без слова выберет случайное."
+		prompt := "Вы Мастер в игре \"Импостер\" в чате \"" + html.EscapeString(cg.title) +
+			"\". Пришлите сюда загаданное слово командой /word &lt;слово&gt;. Команда /word без слова выберет случайное."
 		if _, err := c.tg.SendHTML(ctx, g.Master.ID, prompt, nil); err != nil {
 			c.logger.InfoContext(ctx, "Не удалось написать мастеру", "user_id", g.Master.ID, "err", err)
 			return "Не могу написать Мастеру. Откройте диалог со мной и нажмите /start"
@@ -618,7 +654,7 @@ func (c *imposterController) changeSetting(ctx context.Context, chatID int64, ms
 }
 
 func (c *imposterController) settingsText(chatID int64) string {
-	return "⚙️ <b>Настройки «Импостер»</b>\nДействуют на следующие игры в этом чате.\n\n" + settingsSummary(c.settingsFor(chatID))
+	return "⚙️ <b>Настройки \"Импостер\"</b>\nДействуют на следующие игры в этом чате.\n\n" + settingsSummary(c.settingsFor(chatID))
 }
 
 func (c *imposterController) settingsKeyboard(chatID int64) *models.InlineKeyboardMarkup {
@@ -750,7 +786,7 @@ func revealText(g *imposter.Game) string {
 
 func cardText(g *imposter.Game, p imposter.Player, chatTitle string) string {
 	card := g.Card(p.ID)
-	head := "🕵️ Игра «Импостер» в чате «" + html.EscapeString(chatTitle) + "»\n\n"
+	head := "🕵️ Игра \"Импостер\" в чате \"" + html.EscapeString(chatTitle) + "\"\n\n"
 	if card.Impostor {
 		return head + "Ты - <b>ИМПОСТЕР</b> 😈\nСлова ты не знаешь. Слушай подсказки, подстраивайся и не выдай себя."
 	}
@@ -764,7 +800,7 @@ func settingsSummary(s imposter.Settings) string {
 
 func listLabel(list string) string {
 	if name, ok := imposter.TopicName(list); ok {
-		return "тема «" + name + "»"
+		return "тема \"" + name + "\""
 	}
 	return "скачанный список"
 }
