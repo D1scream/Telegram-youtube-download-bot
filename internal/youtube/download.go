@@ -29,7 +29,7 @@ type Messenger interface {
 	DeleteMessage(ctx context.Context, chatID int64, messageID int) error
 }
 
-type fileDownloader func(ctx context.Context, pageURL string) (path string, err error)
+type fileDownloader func(ctx context.Context, pageURL string) (downloadResult, error)
 
 type fileSender func(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error)
 
@@ -86,7 +86,7 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 	defer cancel()
 
 	pageURL := strings.TrimSpace(job.rawURL)
-	path, err := job.download(workCtx, pageURL)
+	result, err := job.download(workCtx, pageURL)
 	if err != nil {
 		s.logger.ErrorContext(workCtx, "yt-dlp ошибка", "url", pageURL, "err", err)
 		if _, replyErr := s.messenger.ReplyToChat(
@@ -99,7 +99,13 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 		}
 		return
 	}
+	path := result.path
 	defer os.RemoveAll(filepath.Dir(path))
+
+	if result.cookiesErr != nil {
+		s.logger.WarnContext(workCtx, "YouTube отклонил cookies, файл скачан без них", "url", pageURL, "err", result.cookiesErr)
+		s.reply(workCtx, job, "YouTube отклонил cookies, файл скачан без них. ")
+	}
 
 	info, err := os.Stat(path)
 	if err != nil {
@@ -134,7 +140,7 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 	defer file.Close()
 
 	name := filepath.Base(path)
-	if _, sendErr := job.send(workCtx, job.chatID, job.messageID, name, file); sendErr != nil {
+	if _, sendErr := job.send(workCtx, job.chatID, 0, name, file); sendErr != nil {
 		s.logger.ErrorContext(workCtx, "Не удалось отправить файл YouTube", "path", path, "err", sendErr)
 		if _, replyErr := s.messenger.ReplyToChat(
 			workCtx,
@@ -153,7 +159,7 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 func (s *Service) sendFileshareLink(ctx context.Context, job downloadJob, path string, size int64) {
 	sizeMB := float64(size) / (1024 * 1024)
 	if size > litterboxMaxUploadBytes {
-		s.replyError(ctx, job, fmt.Sprintf("Файл слишком большой (%.1f MB): лимит Telegram 50 MB, файлообменника 1 GB", sizeMB))
+		s.reply(ctx, job, fmt.Sprintf("Файл слишком большой (%.1f MB): лимит Telegram 50 MB, файлообменника 1 GB", sizeMB))
 		return
 	}
 
@@ -162,19 +168,18 @@ func (s *Service) sendFileshareLink(ctx context.Context, job downloadJob, path s
 	link, err := s.fileshare.upload(ctx, path)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "Не удалось загрузить файл на файлообменник", "path", path, "err", err)
-		s.replyError(ctx, job, fmt.Sprintf("Файл слишком большой для Telegram (%.1f MB), а загрузить его на файлообменник не удалось", sizeMB))
+		s.reply(ctx, job, fmt.Sprintf("Файл слишком большой для Telegram (%.1f MB), а загрузить его на файлообменник не удалось", sizeMB))
 		return
 	}
 
-	reply := fmt.Sprintf("%s (%.1f MB)\n%s\nСсылка действует %s", filepath.Base(path), sizeMB, link, litterboxRetention)
-	if _, err := s.messenger.ReplyToChat(ctx, job.chatID, job.messageID, reply); err != nil {
+	if _, err := s.messenger.ReplyToChat(ctx, job.chatID, 0, link); err != nil {
 		s.logger.ErrorContext(ctx, "Не удалось отправить ссылку YouTube", "link", link, "err", err)
 		return
 	}
 	s.deleteCommand(ctx, job)
 }
 
-func (s *Service) replyError(ctx context.Context, job downloadJob, text string) {
+func (s *Service) reply(ctx context.Context, job downloadJob, text string) {
 	if _, err := s.messenger.ReplyToChat(ctx, job.chatID, job.messageID, text); err != nil {
 		s.logger.ErrorContext(ctx, "Не удалось отправить ответ YouTube", "err", err)
 	}

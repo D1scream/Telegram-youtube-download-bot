@@ -74,14 +74,18 @@ func (t *Bot) Start(ctx context.Context, handler MessageHandler, callbacks Callb
 	return nil
 }
 
+func replyTo(messageID int) *models.ReplyParameters {
+	if messageID == 0 {
+		return nil
+	}
+	return &models.ReplyParameters{MessageID: messageID, AllowSendingWithoutReply: true}
+}
+
 func (t *Bot) ReplyToChat(ctx context.Context, chatID int64, messageID int, message string) (int, error) {
 	return t.sendMessage(ctx, &bot.SendMessageParams{
-		ChatID: chatID,
-		Text:   message,
-		ReplyParameters: &models.ReplyParameters{
-			MessageID:                messageID,
-			AllowSendingWithoutReply: true,
-		},
+		ChatID:          chatID,
+		Text:            message,
+		ReplyParameters: replyTo(messageID),
 	})
 }
 
@@ -93,10 +97,7 @@ func (t *Bot) ReplyVideo(ctx context.Context, chatID int64, messageID int, filen
 			Data:     file,
 		},
 		SupportsStreaming: true,
-		ReplyParameters: &models.ReplyParameters{
-			MessageID:                messageID,
-			AllowSendingWithoutReply: true,
-		},
+		ReplyParameters:   replyTo(messageID),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("отправить видео Telegram: %w", err)
@@ -111,10 +112,7 @@ func (t *Bot) ReplyAudio(ctx context.Context, chatID int64, messageID int, filen
 			Filename: filename,
 			Data:     file,
 		},
-		ReplyParameters: &models.ReplyParameters{
-			MessageID:                messageID,
-			AllowSendingWithoutReply: true,
-		},
+		ReplyParameters: replyTo(messageID),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("отправить аудио Telegram: %w", err)
