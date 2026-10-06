@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-telegram/bot/models"
 
-	"telegram-bot/internal/chess"
 	"telegram-bot/internal/imposter"
 	"telegram-bot/internal/souchastnik"
 	"telegram-bot/internal/youtube"
@@ -18,18 +17,16 @@ type Handler struct {
 	checker  *souchastnik.Client
 	tg       *Bot
 	imposter *imposterController
-	chess    *chessController
 	history  *history
 	logger   *slog.Logger
 }
 
-func NewHandler(yt *youtube.Service, checker *souchastnik.Client, tg *Bot, bank *imposter.WordList, store *imposter.Store, chessStore *chess.Store, logger *slog.Logger) *Handler {
+func NewHandler(yt *youtube.Service, checker *souchastnik.Client, tg *Bot, bank *imposter.WordList, store *imposter.Store, logger *slog.Logger) *Handler {
 	return &Handler{
 		youtube:  yt,
 		checker:  checker,
 		tg:       tg,
 		imposter: newImposterController(tg, bank, store, logger),
-		chess:    newChessController(tg, chessStore, logger),
 		history:  newHistory(),
 		logger:   logger.With("component", "telegram_handler"),
 	}
@@ -37,7 +34,6 @@ func NewHandler(yt *youtube.Service, checker *souchastnik.Client, tg *Bot, bank 
 
 func (h *Handler) HandleCallback(ctx context.Context, query *models.CallbackQuery) {
 	h.imposter.handleCallback(ctx, query)
-	h.chess.handleCallback(ctx, query)
 }
 
 func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
@@ -59,10 +55,6 @@ func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 		h.imposter.handleCommand(ctx, msg, "imposter_settings")
 	case isCommand(cmd, "imposter_stop"):
 		h.imposter.handleCommand(ctx, msg, "imposter_stop")
-	case isCommand(cmd, "chess"):
-		h.chess.handleCommand(ctx, msg, "chess")
-	case isCommand(cmd, "chess_stop"):
-		h.chess.handleCommand(ctx, msg, "chess_stop")
 	case isCommand(cmd, "topic"):
 		h.imposter.handleTopic(ctx, msg, args)
 	case isCommand(cmd, "word"):
