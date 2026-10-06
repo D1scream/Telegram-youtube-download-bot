@@ -24,7 +24,7 @@ const (
 var (
 	ErrBadTopicName  = errors.New("название темы: до 30 символов, без двоеточия и переносов строк")
 	ErrNoTopic       = errors.New("такой темы нет")
-	ErrTooManyTopics = errors.New("слишком много тем в чате")
+	ErrTooManyTopics = errors.New("слишком много тем")
 	ErrTopicFull     = errors.New("в теме слишком много слов")
 )
 
@@ -37,25 +37,26 @@ func TopicName(list string) (string, bool) {
 }
 
 type chatState struct {
-	Settings *Settings           `json:"settings,omitempty"`
-	Topics   map[string][]string `json:"topics,omitempty"`
+	Settings *Settings `json:"settings,omitempty"`
 }
 
-// Store хранит настройки чатов и их темы в json-файле. Все изменения сразу сохраняются на диск.
+// Store хранит настройки чатов и общие темы в json-файле. Все изменения сразу сохраняются на диск.
 type Store struct {
-	mu    sync.Mutex
-	path  string
-	chats map[int64]*chatState
+	mu     sync.Mutex
+	path   string
+	chats  map[int64]*chatState
+	topics map[string][]string
 }
 
 type storeFile struct {
-	Chats map[int64]*chatState `json:"chats"`
+	Chats  map[int64]*chatState `json:"chats"`
+	Topics map[string][]string  `json:"topics,omitempty"`
 }
 
 // OpenStore читает состояние из файла; если файла нет, начинает с пустого.
 // Повреждённый файл не перезаписывается, возвращается ошибка.
 func OpenStore(path string) (*Store, error) {
-	s := &Store{path: path, chats: make(map[int64]*chatState)}
+	s := &Store{path: path, chats: make(map[int64]*chatState), topics: make(map[string][]string)}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -70,6 +71,9 @@ func OpenStore(path string) (*Store, error) {
 	if f.Chats != nil {
 		s.chats = f.Chats
 	}
+	if f.Topics != nil {
+		s.topics = f.Topics
+	}
 	return s, nil
 }
 
@@ -83,7 +87,7 @@ func (s *Store) chat(id int64) *chatState {
 }
 
 func (s *Store) save() error {
-	data, err := json.MarshalIndent(storeFile{Chats: s.chats}, "", "  ")
+	data, err := json.MarshalIndent(storeFile{Chats: s.chats, Topics: s.topics}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("сериализовать состояние игры: %w", err)
 	}
@@ -101,8 +105,8 @@ func (s *Store) save() error {
 }
 
 // findTopic ищет тему без учёта регистра и возвращает её сохранённое название.
-func (c *chatState) findTopic(name string) (string, bool) {
-	for key := range c.Topics {
+func (s *Store) findTopic(name string) (string, bool) {
+	for key := range s.topics {
 		if strings.EqualFold(key, name) {
 			return key, true
 		}
@@ -122,7 +126,7 @@ func (s *Store) Settings(chatID int64, def Settings) Settings {
 	out.Secret = false
 	out.Rounds = min(max(out.Rounds, 1), MaxRounds)
 	if name, ok := TopicName(out.List); ok {
-		if key, found := c.findTopic(name); found {
+		if key, found := s.findTopic(name); found {
 			out.List = TopicList(key)
 		} else {
 			out.List = ListDownloaded
@@ -145,20 +149,12 @@ func (s *Store) SetSettings(chatID int64, settings Settings) error {
 	return s.save()
 }
 
-// TopicNames возвращает названия тем чата по алфавиту.
-func (s *Store) TopicNames(chatID int64) []string {
+// TopicNames возвращает названия тем по алфавиту.
+func (s *Store) TopicNames() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.topicNames(chatID)
-}
-
-func (s *Store) topicNames(chatID int64) []string {
-	c := s.chats[chatID]
-	if c == nil {
-		return nil
-	}
-	names := make([]string, 0, len(c.Topics))
-	for name := range c.Topics {
+	names := make([]string, 0, len(s.topics))
+	for name := range s.topics {
 		names = append(names, name)
 	}
 	slices.SortFunc(names, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
@@ -166,18 +162,14 @@ func (s *Store) topicNames(chatID int64) []string {
 }
 
 // TopicWords возвращает копию слов темы.
-func (s *Store) TopicWords(chatID int64, name string) ([]string, bool) {
+func (s *Store) TopicWords(name string) ([]string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c := s.chats[chatID]
-	if c == nil {
-		return nil, false
-	}
-	key, ok := c.findTopic(name)
+	key, ok := s.findTopic(name)
 	if !ok {
 		return nil, false
 	}
-	return slices.Clone(c.Topics[key]), true
+	return slices.Clone(s.topics[key]), true
 }
 
 func validTopicName(name string) bool {
@@ -186,7 +178,7 @@ func validTopicName(name string) bool {
 }
 
 // AddTopicWords добавляет слова в тему, создавая её при необходимости. Возвращает число новых слов.
-func (s *Store) AddTopicWords(chatID int64, name string, words []string) (int, error) {
+func (s *Store) AddTopicWords(name string, words []string) (int, error) {
 	name = strings.TrimSpace(name)
 	if !validTopicName(name) {
 		return 0, ErrBadTopicName
@@ -194,15 +186,14 @@ func (s *Store) AddTopicWords(chatID int64, name string, words []string) (int, e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	c := s.chat(chatID)
-	key, exists := c.findTopic(name)
+	key, exists := s.findTopic(name)
 	if !exists {
-		if len(c.Topics) >= MaxTopics {
+		if len(s.topics) >= MaxTopics {
 			return 0, ErrTooManyTopics
 		}
 		key = name
 	}
-	have := slices.Clone(c.Topics[key])
+	have := slices.Clone(s.topics[key])
 	added := 0
 	for _, w := range words {
 		if slices.Contains(have, w) {
@@ -214,41 +205,30 @@ func (s *Store) AddTopicWords(chatID int64, name string, words []string) (int, e
 		have = append(have, w)
 		added++
 	}
-	if c.Topics == nil {
-		c.Topics = make(map[string][]string)
-	}
-	c.Topics[key] = have
+	s.topics[key] = have
 	return added, s.save()
 }
 
 // RemoveTopicWords удаляет слова из темы. Возвращает число удалённых слов.
-func (s *Store) RemoveTopicWords(chatID int64, name string, words []string) (int, error) {
+func (s *Store) RemoveTopicWords(name string, words []string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c := s.chats[chatID]
-	if c == nil {
-		return 0, ErrNoTopic
-	}
-	key, ok := c.findTopic(name)
+	key, ok := s.findTopic(name)
 	if !ok {
 		return 0, ErrNoTopic
 	}
-	before := len(c.Topics[key])
-	c.Topics[key] = slices.DeleteFunc(slices.Clone(c.Topics[key]), func(w string) bool { return slices.Contains(words, w) })
-	return before - len(c.Topics[key]), s.save()
+	before := len(s.topics[key])
+	s.topics[key] = slices.DeleteFunc(slices.Clone(s.topics[key]), func(w string) bool { return slices.Contains(words, w) })
+	return before - len(s.topics[key]), s.save()
 }
 
-func (s *Store) DeleteTopic(chatID int64, name string) error {
+func (s *Store) DeleteTopic(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c := s.chats[chatID]
-	if c == nil {
-		return ErrNoTopic
-	}
-	key, ok := c.findTopic(name)
+	key, ok := s.findTopic(name)
 	if !ok {
 		return ErrNoTopic
 	}
-	delete(c.Topics, key)
+	delete(s.topics, key)
 	return s.save()
 }

@@ -19,8 +19,8 @@ import (
 const imposterHelp = `Импостер
 /imposter - набрать игроков
 /imposter_settings - настройки
-/imposter_stop - остановить игру (ведущий или админ)
-/topic - свои темы со списками слов (админы чата)
+/imposter_stop - остановить игру
+/topic - свои темы со списками слов
 /word <слово> - подсказка на своём ходу (или догадка пойманного импостера)
 Чтобы получать слова, каждый игрок должен один раз написать боту в личку /start`
 
@@ -60,9 +60,9 @@ func (c *imposterController) settingsFor(chatID int64) imposter.Settings {
 }
 
 // pickWords выбирает n слов из списка, заданного в настройках игры.
-func (c *imposterController) pickWords(chatID int64, list string, n int) ([]string, error) {
+func (c *imposterController) pickWords(list string, n int) ([]string, error) {
 	if name, ok := imposter.TopicName(list); ok {
-		words, found := c.store.TopicWords(chatID, name)
+		words, found := c.store.TopicWords(name)
 		if !found {
 			return nil, imposter.ErrNoTopic
 		}
@@ -125,26 +125,22 @@ func (c *imposterController) stop(ctx context.Context, msg *models.Message) {
 		c.say(ctx, msg.Chat.ID, "Сейчас нет активной игры")
 		return
 	}
-	if msg.From == nil || (msg.From.ID != cg.game.Host.ID && !c.tg.IsChatAdmin(ctx, msg.Chat.ID, msg.From.ID)) {
-		c.say(ctx, msg.Chat.ID, "Остановить игру может ведущий или админ чата")
-		return
-	}
 	delete(c.games, msg.Chat.ID)
 	c.say(ctx, msg.Chat.ID, "Игра остановлена."+revealText(cg.game))
 }
 
-const topicUsage = `Темы (свои списки слов для игры в этом чате)
+const topicUsage = `Темы (свои списки слов для игры)
 /topic - список тем
 /topic show Название - слова темы
 /topic add Название: слово - добавить одно слово (тема создаётся сама)
 /topic remove Название: слово - убрать одно слово
 /topic delete Название - удалить тему целиком
-Изменять темы могут админы чата. Выбрать тему: /imposter_settings, кнопка "Слова"`
+Выбрать тему: /imposter_settings в группе, кнопка "Слова"`
 
 // maxTopicShowRunes ограничивает вывод /topic show: сообщение Telegram не длиннее 4096 символов.
 const maxTopicShowRunes = 3500
 
-// handleTopic управляет темами чата: /topic [show|add|remove|delete] ...
+// handleTopic управляет темами: /topic [show|add|remove|delete] ...
 func (c *imposterController) handleTopic(ctx context.Context, msg *models.Message, args string) {
 	if msg.From == nil {
 		return
@@ -152,11 +148,6 @@ func (c *imposterController) handleTopic(ctx context.Context, msg *models.Messag
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if msg.Chat.Type == models.ChatTypePrivate {
-		c.reply(ctx, msg, "Темы настраиваются в групповом чате")
-		return
-	}
-	chatID := msg.Chat.ID
 	action, rest, _ := strings.Cut(strings.TrimSpace(args), " ")
 	action = strings.ToLower(action)
 
@@ -172,10 +163,6 @@ func (c *imposterController) handleTopic(ctx context.Context, msg *models.Messag
 		c.reply(ctx, msg, topicUsage)
 		return
 	}
-	if !c.tg.IsChatAdmin(ctx, chatID, msg.From.ID) {
-		c.reply(ctx, msg, "Изменять темы могут только админы чата")
-		return
-	}
 
 	name, wordText, hasWord := strings.Cut(rest, ":")
 	name = strings.TrimSpace(name)
@@ -184,7 +171,7 @@ func (c *imposterController) handleTopic(ctx context.Context, msg *models.Messag
 		return
 	}
 	if action == "delete" {
-		if err := c.store.DeleteTopic(chatID, name); err != nil {
+		if err := c.store.DeleteTopic(name); err != nil {
 			c.reply(ctx, msg, "Не получилось: "+err.Error())
 			return
 		}
@@ -198,7 +185,7 @@ func (c *imposterController) handleTopic(ctx context.Context, msg *models.Messag
 		return
 	}
 	if action == "add" {
-		added, err := c.store.AddTopicWords(chatID, name, []string{word})
+		added, err := c.store.AddTopicWords(name, []string{word})
 		switch {
 		case err != nil:
 			c.reply(ctx, msg, "Не получилось: "+err.Error())
@@ -209,7 +196,7 @@ func (c *imposterController) handleTopic(ctx context.Context, msg *models.Messag
 		}
 		return
 	}
-	removed, err := c.store.RemoveTopicWords(chatID, name, []string{word})
+	removed, err := c.store.RemoveTopicWords(name, []string{word})
 	switch {
 	case err != nil:
 		c.reply(ctx, msg, "Не получилось: "+err.Error())
@@ -221,22 +208,22 @@ func (c *imposterController) handleTopic(ctx context.Context, msg *models.Messag
 }
 
 func (c *imposterController) topicList(ctx context.Context, msg *models.Message) {
-	names := c.store.TopicNames(msg.Chat.ID)
+	names := c.store.TopicNames()
 	if len(names) == 0 {
 		c.reply(ctx, msg, "Тем пока нет.\n\n"+topicUsage)
 		return
 	}
 	var b strings.Builder
-	b.WriteString("Темы чата:\n")
+	b.WriteString("Темы:\n")
 	for _, name := range names {
-		words, _ := c.store.TopicWords(msg.Chat.ID, name)
+		words, _ := c.store.TopicWords(name)
 		fmt.Fprintf(&b, "- %s (слов: %d)\n", name, len(words))
 	}
 	c.reply(ctx, msg, b.String()+"\n"+topicUsage)
 }
 
 func (c *imposterController) topicShow(ctx context.Context, msg *models.Message, name string) {
-	words, ok := c.store.TopicWords(msg.Chat.ID, name)
+	words, ok := c.store.TopicWords(name)
 	if !ok {
 		c.reply(ctx, msg, imposter.ErrNoTopic.Error())
 		return
@@ -437,7 +424,7 @@ func (c *imposterController) startGame(ctx context.Context, chatID int64, cg *ch
 		c.say(ctx, chatID, "🎩 Мастер "+mention(g.Master)+" выбирает слово. Я написал ему в личку.")
 		return ""
 	}
-	picked, err := c.pickWords(chatID, g.Settings.List, g.WordsNeeded())
+	picked, err := c.pickWords(g.Settings.List, g.WordsNeeded())
 	if err != nil {
 		c.logger.ErrorContext(ctx, "Не удалось получить слова", "err", err)
 		return "Не удалось получить слова: " + err.Error()
@@ -461,7 +448,7 @@ func (c *imposterController) masterWord(ctx context.Context, msg *models.Message
 	var picked []string
 	if strings.TrimSpace(text) == "" {
 		var err error
-		if picked, err = c.pickWords(chatID, cg.game.Settings.List, 1); err != nil {
+		if picked, err = c.pickWords(cg.game.Settings.List, 1); err != nil {
 			c.logger.ErrorContext(ctx, "Не удалось получить слово", "err", err)
 			c.reply(ctx, msg, "Не удалось выбрать слово, пришлите его сами: /word <слово>")
 			return
@@ -620,9 +607,9 @@ func secretKeyboard(on bool) *models.InlineKeyboardMarkup {
 	return button("Секретный режим: "+modeLabel(on), "imp:set:secret")
 }
 
-func (c *imposterController) nextList(chatID int64, current string) string {
+func (c *imposterController) nextList(current string) string {
 	lists := []string{imposter.ListDownloaded}
-	for _, name := range c.store.TopicNames(chatID) {
+	for _, name := range c.store.TopicNames() {
 		lists = append(lists, imposter.TopicList(name))
 	}
 	i := slices.Index(lists, current)
@@ -643,7 +630,7 @@ func (c *imposterController) changeSetting(ctx context.Context, chatID int64, ms
 	case "master":
 		s.Master = !s.Master
 	case "list":
-		s.List = c.nextList(chatID, s.List)
+		s.List = c.nextList(s.List)
 	}
 	if err := c.store.SetSettings(chatID, s); err != nil {
 		c.logger.ErrorContext(ctx, "Не удалось сохранить настройки", "err", err)
