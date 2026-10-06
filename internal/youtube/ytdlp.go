@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -66,15 +67,49 @@ func looksLikePath(bin string) bool {
 	return filepath.IsAbs(bin) || strings.ContainsAny(bin, `/\`)
 }
 
-func (y *ytdlp) downloadAudio(ctx context.Context, pageURL string) (string, error) {
-	return y.download(ctx, pageURL, "bestaudio", "%(title)s [audio].%(ext)s", "")
+type downloadResult struct {
+	path       string
+	cookiesErr error
 }
 
-func (y *ytdlp) downloadVideo(ctx context.Context, pageURL string) (string, error) {
-	return y.download(ctx, pageURL, "bestvideo+bestaudio/best", "%(title)s [video].%(ext)s", "mkv")
+func (y *ytdlp) downloadAudio(ctx context.Context, pageURL string) (downloadResult, error) {
+	return y.download(ctx, pageURL, "bestaudio", "%(title)s [audio].%(ext)s",
+		"--extract-audio", "--audio-format", "mp3", "--audio-quality", "192K")
 }
 
-func (y *ytdlp) download(ctx context.Context, pageURL, format, outputTemplate, mergeFormat string) (string, error) {
+func (y *ytdlp) downloadVideo(ctx context.Context, pageURL string) (downloadResult, error) {
+	return y.download(ctx, pageURL, "bestvideo+bestaudio/best", "%(title)s [video].%(ext)s",
+		"--merge-output-format", "mkv")
+}
+
+func (y *ytdlp) download(ctx context.Context, pageURL, format, outputTemplate string, extraArgs ...string) (downloadResult, error) {
+	args := []string{
+		"--no-playlist",
+		"--no-warnings",
+		"-f", format,
+		"--print", "after_move:filepath",
+	}
+	args = append(args, extraArgs...)
+
+	ctx, cancel := context.WithTimeout(ctx, ytdlpDownloadTimeout)
+	defer cancel()
+
+	if !y.hasCookies() {
+		path, err := y.attempt(ctx, args, outputTemplate, pageURL, false)
+		return downloadResult{path: path}, err
+	}
+	path, err := y.attempt(ctx, args, outputTemplate, pageURL, true)
+	if err == nil {
+		return downloadResult{path: path}, nil
+	}
+	path, plainErr := y.attempt(ctx, args, outputTemplate, pageURL, false)
+	if plainErr != nil {
+		return downloadResult{}, err
+	}
+	return downloadResult{path: path, cookiesErr: err}, nil
+}
+
+func (y *ytdlp) attempt(ctx context.Context, args []string, outputTemplate, pageURL string, withCookies bool) (string, error) {
 	workDir, err := os.MkdirTemp(y.outputDir, "job-*")
 	if err != nil {
 		return "", err
@@ -86,26 +121,15 @@ func (y *ytdlp) download(ctx context.Context, pageURL, format, outputTemplate, m
 		}
 	}()
 
-	outPattern := filepath.Join(workDir, outputTemplate)
-	args := []string{
-		"--no-playlist",
-		"--no-warnings",
-		"-f", format,
-		"-o", outPattern,
-		"--print", "after_move:filepath",
+	args = slices.Clone(args)
+	if withCookies {
+		cookieArgs, err := y.cookieArgs(workDir)
+		if err != nil {
+			return "", err
+		}
+		args = append(args, cookieArgs...)
 	}
-	if mergeFormat != "" {
-		args = append(args, "--merge-output-format", mergeFormat)
-	}
-	cookieArgs, err := y.cookieArgs(workDir)
-	if err != nil {
-		return "", err
-	}
-	args = append(args, cookieArgs...)
-	args = append(args, pageURL)
-
-	ctx, cancel := context.WithTimeout(ctx, ytdlpDownloadTimeout)
-	defer cancel()
+	args = append(args, "-o", filepath.Join(workDir, outputTemplate), pageURL)
 
 	cmd := exec.CommandContext(ctx, y.bin, args...)
 	var stderr bytes.Buffer
@@ -129,6 +153,15 @@ func (y *ytdlp) download(ctx context.Context, pageURL, format, outputTemplate, m
 	}
 	keep = true
 	return path, nil
+}
+
+func (y *ytdlp) hasCookies() bool {
+	if file := strings.TrimSpace(y.cookiesFile); file != "" {
+		if _, err := os.Stat(file); err == nil {
+			return true
+		}
+	}
+	return strings.TrimSpace(y.cookiesBrowser) != ""
 }
 
 func (y *ytdlp) cookieArgs(workDir string) ([]string, error) {

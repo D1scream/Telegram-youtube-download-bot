@@ -6,10 +6,10 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /bot ./cmd/bot
 
-FROM alpine:3.19
+FROM alpine:3.22
 
-RUN apk add --no-cache ca-certificates tzdata ffmpeg python3 py3-pip \
- && pip3 install --no-cache-dir -U yt-dlp --break-system-packages \
+RUN apk add --no-cache ca-certificates tzdata ffmpeg python3 py3-pip deno \
+ && pip3 install --no-cache-dir -U "yt-dlp[default]" --break-system-packages \
  && ln -sf "$(command -v yt-dlp)" /usr/local/bin/yt-dlp
 
 WORKDIR /app
