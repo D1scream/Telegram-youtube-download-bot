@@ -26,6 +26,7 @@ type Messenger interface {
 	ReplyToChat(ctx context.Context, chatID int64, messageID int, text string) (int, error)
 	ReplyAudio(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error)
 	ReplyVideo(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error)
+	DeleteMessage(ctx context.Context, chatID int64, messageID int) error
 }
 
 type fileDownloader func(ctx context.Context, pageURL string) (path string, err error)
@@ -42,6 +43,7 @@ type downloadJob struct {
 
 type Service struct {
 	ytdlp     *ytdlp
+	fileshare *litterbox
 	messenger Messenger
 	logger    *slog.Logger
 }
@@ -53,6 +55,7 @@ func New(cfg Config, messenger Messenger, logger *slog.Logger) (*Service, error)
 	}
 	return &Service{
 		ytdlp:     dl,
+		fileshare: newLitterbox(),
 		messenger: messenger,
 		logger:    logger.With("component", "youtube_download"),
 	}, nil
@@ -112,13 +115,7 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 	}
 
 	if info.Size() > telegramMaxUploadBytes {
-		reply := fmt.Sprintf(
-			"Файл слишком большой для Telegram (%.1f MB, лимит 50 MB)",
-			float64(info.Size())/(1024*1024),
-		)
-		if _, replyErr := s.messenger.ReplyToChat(workCtx, job.chatID, job.messageID, reply); replyErr != nil {
-			s.logger.ErrorContext(workCtx, "Не удалось отправить ответ YouTube", "err", replyErr)
-		}
+		s.sendFileshareLink(workCtx, job, path, info.Size())
 		return
 	}
 
@@ -147,5 +144,44 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 		); replyErr != nil {
 			s.logger.ErrorContext(workCtx, "Не удалось отправить ответ YouTube", "err", replyErr)
 		}
+		return
+	}
+
+	s.deleteCommand(workCtx, job)
+}
+
+func (s *Service) sendFileshareLink(ctx context.Context, job downloadJob, path string, size int64) {
+	sizeMB := float64(size) / (1024 * 1024)
+	if size > litterboxMaxUploadBytes {
+		s.replyError(ctx, job, fmt.Sprintf("Файл слишком большой (%.1f MB): лимит Telegram 50 MB, файлообменника 1 GB", sizeMB))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fileshareUploadTimeout)
+	defer cancel()
+	link, err := s.fileshare.upload(ctx, path)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "Не удалось загрузить файл на файлообменник", "path", path, "err", err)
+		s.replyError(ctx, job, fmt.Sprintf("Файл слишком большой для Telegram (%.1f MB), а загрузить его на файлообменник не удалось", sizeMB))
+		return
+	}
+
+	reply := fmt.Sprintf("%s (%.1f MB)\n%s\nСсылка действует %s", filepath.Base(path), sizeMB, link, litterboxRetention)
+	if _, err := s.messenger.ReplyToChat(ctx, job.chatID, job.messageID, reply); err != nil {
+		s.logger.ErrorContext(ctx, "Не удалось отправить ссылку YouTube", "link", link, "err", err)
+		return
+	}
+	s.deleteCommand(ctx, job)
+}
+
+func (s *Service) replyError(ctx context.Context, job downloadJob, text string) {
+	if _, err := s.messenger.ReplyToChat(ctx, job.chatID, job.messageID, text); err != nil {
+		s.logger.ErrorContext(ctx, "Не удалось отправить ответ YouTube", "err", err)
+	}
+}
+
+func (s *Service) deleteCommand(ctx context.Context, job downloadJob) {
+	if err := s.messenger.DeleteMessage(ctx, job.chatID, job.messageID); err != nil {
+		s.logger.WarnContext(ctx, "Не удалось удалить команду YouTube", "err", err)
 	}
 }

@@ -153,6 +153,17 @@ func (t *Bot) AnswerCallback(ctx context.Context, queryID, text string, alert bo
 	return nil
 }
 
+func (t *Bot) DeleteMessage(ctx context.Context, chatID int64, messageID int) error {
+	_, err := t.client.DeleteMessage(ctx, &bot.DeleteMessageParams{
+		ChatID:    chatID,
+		MessageID: messageID,
+	})
+	if err != nil {
+		return fmt.Errorf("удалить сообщение Telegram: %w", err)
+	}
+	return nil
+}
+
 func (t *Bot) sendMessage(ctx context.Context, params *bot.SendMessageParams) (int, error) {
 	msg, err := t.client.SendMessage(ctx, params)
 	if err != nil {
