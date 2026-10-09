@@ -21,12 +21,12 @@ type Handler struct {
 	logger   *slog.Logger
 }
 
-func NewHandler(yt *youtube.Service, checker *souchastnik.Client, tg *Bot, bank *imposter.WordList, store *imposter.Store, logger *slog.Logger) *Handler {
+func NewHandler(yt *youtube.Service, checker *souchastnik.Client, tg *Bot, bank *imposter.WordList, store *imposter.Store, ownerID int64, logger *slog.Logger) *Handler {
 	return &Handler{
 		youtube:  yt,
 		checker:  checker,
 		tg:       tg,
-		imposter: newImposterController(tg, bank, store, logger),
+		imposter: newImposterController(tg, bank, store, ownerID, logger),
 		history:  newHistory(),
 		logger:   logger.With("component", "telegram_handler"),
 	}
@@ -55,6 +55,10 @@ func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 		h.imposter.handleCommand(ctx, msg, "imposter_settings")
 	case isCommand(cmd, "imposter_stop"):
 		h.imposter.handleCommand(ctx, msg, "imposter_stop")
+	case isCommand(cmd, "imposter_ban"):
+		h.imposter.handleBan(ctx, msg, args, true)
+	case isCommand(cmd, "imposter_unban"):
+		h.imposter.handleBan(ctx, msg, args, false)
 	case isCommand(cmd, "topic"):
 		h.imposter.handleTopic(ctx, msg, args)
 	case isCommand(cmd, "word"):

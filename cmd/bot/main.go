@@ -9,12 +9,17 @@ import (
 
 	"telegram-bot/internal/config"
 	"telegram-bot/internal/imposter"
+	"telegram-bot/internal/msglog"
 	"telegram-bot/internal/souchastnik"
 	"telegram-bot/internal/transport/telegram"
 	"telegram-bot/internal/youtube"
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		os.Exit(runCLI(os.Args[1:]))
+	}
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -34,6 +39,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	msgLog, err := msglog.Open(cfg.MessageLogDir, cfg.MessageLogMaxMB*1024*1024)
+	if err != nil {
+		logger.Error("Ошибка открытия лога сообщений", "err", err)
+		os.Exit(1)
+	}
+	defer msgLog.Close()
+	tg.SetMessageLog(msgLog, logger)
+
 	bank, err := newWordList(cfg, logger)
 	if err != nil {
 		logger.Error("Ошибка загрузки банка слов", "err", err)
@@ -47,7 +60,7 @@ func main() {
 		logger.Error("Ошибка загрузки состояния игры", "err", err)
 		os.Exit(1)
 	}
-	handler := telegram.NewHandler(newYouTube(cfg, tg, logger), checker, tg, bank, store, logger)
+	handler := telegram.NewHandler(newYouTube(cfg, tg, logger), checker, tg, bank, store, cfg.OwnerID, logger)
 	if err := tg.Start(ctx, handler.HandleMessage, handler.HandleCallback); err != nil {
 		logger.Error("Telegram polling завершился с ошибкой", "err", err)
 		os.Exit(1)

@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+
+	"telegram-bot/internal/msglog"
 )
 
 const pollTimeout = time.Minute
@@ -22,6 +25,8 @@ type Bot struct {
 	client     *bot.Bot
 	onMessage  MessageHandler
 	onCallback CallbackHandler
+	msgLog     *msglog.Writer
+	logger     *slog.Logger
 }
 
 func New(token string) (*Bot, error) {
@@ -51,9 +56,6 @@ func (t *Bot) handleUpdate(ctx context.Context, _ *bot.Bot, update *models.Updat
 		}
 		return
 	}
-	if t.onMessage == nil {
-		return
-	}
 	msg := update.Message
 	if msg == nil {
 		msg = update.ChannelPost
@@ -61,7 +63,10 @@ func (t *Bot) handleUpdate(ctx context.Context, _ *bot.Bot, update *models.Updat
 	if msg == nil {
 		return
 	}
-	t.onMessage(ctx, msg)
+	t.record(msg)
+	if t.onMessage != nil {
+		t.onMessage(ctx, msg)
+	}
 }
 
 func (t *Bot) Start(ctx context.Context, handler MessageHandler, callbacks CallbackHandler) error {
@@ -102,6 +107,7 @@ func (t *Bot) ReplyVideo(ctx context.Context, chatID int64, messageID int, filen
 	if err != nil {
 		return 0, fmt.Errorf("отправить видео Telegram: %w", err)
 	}
+	t.record(msg)
 	return msg.ID, nil
 }
 
@@ -117,6 +123,7 @@ func (t *Bot) ReplyAudio(ctx context.Context, chatID int64, messageID int, filen
 	if err != nil {
 		return 0, fmt.Errorf("отправить аудио Telegram: %w", err)
 	}
+	t.record(msg)
 	return msg.ID, nil
 }
 
@@ -167,5 +174,6 @@ func (t *Bot) sendMessage(ctx context.Context, params *bot.SendMessageParams) (i
 	if err != nil {
 		return 0, fmt.Errorf("отправить сообщение Telegram: %w", err)
 	}
+	t.record(msg)
 	return msg.ID, nil
 }

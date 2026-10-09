@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -40,23 +41,31 @@ type chatState struct {
 	Settings *Settings `json:"settings,omitempty"`
 }
 
-// Store хранит настройки чатов и общие темы в json-файле. Все изменения сразу сохраняются на диск.
+// Store хранит настройки чатов, общие темы и общий чёрный список в json-файле.
+// Все изменения сразу сохраняются на диск.
 type Store struct {
-	mu     sync.Mutex
-	path   string
-	chats  map[int64]*chatState
-	topics map[string][]string
+	mu        sync.Mutex
+	path      string
+	chats     map[int64]*chatState
+	topics    map[string][]string
+	blacklist map[int64]string
 }
 
 type storeFile struct {
-	Chats  map[int64]*chatState `json:"chats"`
-	Topics map[string][]string  `json:"topics,omitempty"`
+	Chats     map[int64]*chatState `json:"chats"`
+	Topics    map[string][]string  `json:"topics,omitempty"`
+	Blacklist map[int64]string     `json:"blacklist,omitempty"`
 }
 
 // OpenStore читает состояние из файла; если файла нет, начинает с пустого.
 // Повреждённый файл не перезаписывается, возвращается ошибка.
 func OpenStore(path string) (*Store, error) {
-	s := &Store{path: path, chats: make(map[int64]*chatState), topics: make(map[string][]string)}
+	s := &Store{
+		path:      path,
+		chats:     make(map[int64]*chatState),
+		topics:    make(map[string][]string),
+		blacklist: make(map[int64]string),
+	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -74,6 +83,9 @@ func OpenStore(path string) (*Store, error) {
 	if f.Topics != nil {
 		s.topics = f.Topics
 	}
+	if f.Blacklist != nil {
+		s.blacklist = f.Blacklist
+	}
 	return s, nil
 }
 
@@ -87,7 +99,7 @@ func (s *Store) chat(id int64) *chatState {
 }
 
 func (s *Store) save() error {
-	data, err := json.MarshalIndent(storeFile{Chats: s.chats, Topics: s.topics}, "", "  ")
+	data, err := json.MarshalIndent(storeFile{Chats: s.chats, Topics: s.topics, Blacklist: s.blacklist}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("сериализовать состояние игры: %w", err)
 	}
@@ -231,4 +243,37 @@ func (s *Store) DeleteTopic(name string) error {
 	}
 	delete(s.topics, key)
 	return s.save()
+}
+
+// Ban добавляет игрока в общий чёрный список. Имя нужно только для вывода списка.
+func (s *Store) Ban(id int64, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blacklist[id] = name
+	return s.save()
+}
+
+// Unban убирает игрока из чёрного списка. Возвращает false, если его там не было.
+func (s *Store) Unban(id int64) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.blacklist[id]; !ok {
+		return false, nil
+	}
+	delete(s.blacklist, id)
+	return true, s.save()
+}
+
+func (s *Store) Banned(id int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.blacklist[id]
+	return ok
+}
+
+// Blacklist возвращает копию чёрного списка: id игрока -> имя.
+func (s *Store) Blacklist() map[int64]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return maps.Clone(s.blacklist)
 }

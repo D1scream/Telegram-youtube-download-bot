@@ -257,9 +257,9 @@ func (g *Game) Current() (Player, bool) {
 	return g.Players[g.turn], true
 }
 
-// Hint принимает подсказку от игрока, чей сейчас ход. Если игрок, знающий слово,
-// назвал его, игра сразу заканчивается победой импостера (leaked == true).
-func (g *Game) Hint(id int64, text string) (leaked bool, err error) {
+// Hint принимает подсказку от игрока, чей сейчас ход. Если игрок, знающий слово, назвал его
+// или импостер угадал его в подсказке, игра сразу заканчивается победой импостера.
+func (g *Game) Hint(id int64, text string) (impostorWins bool, err error) {
 	cur, ok := g.Current()
 	if !ok {
 		return false, ErrWrongPhase
@@ -273,7 +273,7 @@ func (g *Game) Hint(id int64, text string) (leaked bool, err error) {
 	}
 
 	g.Hints = append(g.Hints, Hint{Player: cur, Text: text, Round: g.Round})
-	if !g.Settings.Secret && id != g.Impostor.ID && strings.Contains(Normalize(text), Normalize(g.word)) {
+	if !g.Settings.Secret && g.revealsWord(id, text) {
 		g.Phase = PhaseDone
 		return true, nil
 	}
@@ -287,6 +287,15 @@ func (g *Game) Hint(id int64, text string) (leaked bool, err error) {
 		}
 	}
 	return false, nil
+}
+
+// revealsWord: знающий слово проболтался (слово внутри подсказки)
+// или импостер угадал его (с точностью до одной опечатки, как в Guess).
+func (g *Game) revealsWord(id int64, text string) bool {
+	if id == g.Impostor.ID {
+		return withinOneTypo(Normalize(text), Normalize(g.word))
+	}
+	return strings.Contains(Normalize(text), Normalize(g.word))
 }
 
 // Hinted сообщает, давал ли игрок подсказку в текущем раунде.
