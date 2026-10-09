@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,15 +41,17 @@ type imposterController struct {
 	store    *imposter.Store
 	secret   map[int64]bool
 	games    map[int64]*chatGame
+	ownerID  int64
 	logger   *slog.Logger
 }
 
-func newImposterController(tg *Bot, bank *imposter.WordList, store *imposter.Store, logger *slog.Logger) *imposterController {
+func newImposterController(tg *Bot, bank *imposter.WordList, store *imposter.Store, ownerID int64, logger *slog.Logger) *imposterController {
 	return &imposterController{
 		tg:       tg,
 		bank:     bank,
 		defaults: imposter.DefaultSettings(),
 		store:    store,
+		ownerID:  ownerID,
 		secret:   make(map[int64]bool),
 		games:    make(map[int64]*chatGame),
 		logger:   logger.With("component", "imposter"),
@@ -99,6 +102,10 @@ func (c *imposterController) openLobby(ctx context.Context, msg *models.Message)
 	}
 	if _, busy := c.games[msg.Chat.ID]; busy {
 		c.say(ctx, msg.Chat.ID, "Игра уже идёт. Остановить: /imposter_stop")
+		return
+	}
+	if c.store.Banned(msg.From.ID) {
+		c.reply(ctx, msg, bannedText)
 		return
 	}
 	settings := c.settingsFor(msg.Chat.ID)
@@ -271,18 +278,24 @@ func (c *imposterController) handleWord(ctx context.Context, msg *models.Message
 			c.reply(ctx, msg, "Использование: /word <слово>")
 			return
 		}
-		leaked, err := g.Hint(msg.From.ID, text)
+		impostorWins, err := g.Hint(msg.From.ID, text)
 		switch {
 		case errors.Is(err, imposter.ErrNotOneWord):
 			c.reply(ctx, msg, "Нужна ровно одна подсказка из одного слова")
 		case err != nil:
 			c.logger.ErrorContext(ctx, "Подсказка отклонена", "err", err)
-		case leaked:
+		case impostorWins && msg.From.ID == g.Impostor.ID:
+			delete(c.games, msg.Chat.ID)
+			c.say(ctx, msg.Chat.ID, hintsText(g)+"\nИмпостер "+mention(playerFrom(msg.From))+" угадал(а) загаданное слово! Импостер побеждает 🎉"+revealText(g))
+		case impostorWins:
 			delete(c.games, msg.Chat.ID)
 			c.say(ctx, msg.Chat.ID, hintsText(g)+"\n"+mention(playerFrom(msg.From))+" назвал(а) загаданное слово! Игра окончена, Импостер побеждает 😈"+revealText(g))
 		case g.Phase == imposter.PhaseDiscussion:
-			c.say(ctx, msg.Chat.ID, hintsText(g)+"\nПодсказки закончились. Обсуждайте, кто Импостер, и жмите кнопку, когда будете готовы.",
-				button("Перейти к голосованию", "imp:talk"))
+			if err := g.StartVoting(); err != nil {
+				c.logger.ErrorContext(ctx, "Не удалось начать голосование", "err", err)
+				return
+			}
+			c.sendVoting(ctx, msg.Chat.ID, cg)
 		default:
 			c.announceTurn(ctx, msg.Chat.ID, g)
 		}
@@ -356,6 +369,10 @@ func (c *imposterController) handleCallback(ctx context.Context, q *models.Callb
 
 	switch parts[1] {
 	case "join":
+		if c.store.Banned(user.ID) {
+			answer(bannedText, true)
+			return
+		}
 		switch added, err := g.Join(user); {
 		case err != nil:
 			answer(err.Error(), true)
@@ -383,16 +400,6 @@ func (c *imposterController) handleCallback(ctx context.Context, q *models.Callb
 		if text := c.startGame(ctx, chatID, cg); text != "" {
 			answer(text, true)
 		}
-	case "talk":
-		if !g.HasPlayer(user.ID) {
-			answer("Вы не участвуете в игре", true)
-			return
-		}
-		if err := g.StartVoting(); err != nil {
-			answer(err.Error(), true)
-			return
-		}
-		c.sendVoting(ctx, chatID, cg)
 	case "vote":
 		if len(parts) != 3 {
 			return
@@ -811,4 +818,77 @@ func tieLabel(t imposter.TiePolicy) string {
 		return "ещё один раунд"
 	}
 	return "победа Импостера"
+}
+
+const bannedText = "Ты забанен"
+
+const banUsage = `Чёрный список
+/imposter_ban - ответом на сообщение игрока или /imposter_ban <id>
+/imposter_unban - ответом на сообщение или /imposter_unban <id>
+/imposter_ban без аргументов - показать список`
+
+func (c *imposterController) handleBan(ctx context.Context, msg *models.Message, args string, ban bool) {
+	if msg.From == nil {
+		return
+	}
+	if c.ownerID == 0 {
+		c.reply(ctx, msg, fmt.Sprintf("Чёрный список выключен: OWNER_ID не задан. Ваш id: %d", msg.From.ID))
+		return
+	}
+	if msg.From.ID != c.ownerID {
+		c.reply(ctx, msg, "Чёрным списком управляет только владелец бота")
+		return
+	}
+
+	target, ok := banTarget(msg, args)
+	switch {
+	case !ok && ban && strings.TrimSpace(args) == "":
+		c.reply(ctx, msg, c.blacklistText())
+	case !ok:
+		c.reply(ctx, msg, banUsage)
+	case ban && target.ID == c.ownerID:
+		c.reply(ctx, msg, "Себя забанить нельзя")
+	case ban:
+		if err := c.store.Ban(target.ID, target.Name); err != nil {
+			c.logger.ErrorContext(ctx, "Не удалось сохранить чёрный список", "err", err)
+			c.reply(ctx, msg, "Не получилось сохранить чёрный список")
+			return
+		}
+		c.reply(ctx, msg, fmt.Sprintf("%s (%d) в чёрном списке", target.Name, target.ID))
+	default:
+		removed, err := c.store.Unban(target.ID)
+		switch {
+		case err != nil:
+			c.logger.ErrorContext(ctx, "Не удалось сохранить чёрный список", "err", err)
+			c.reply(ctx, msg, "Не получилось сохранить чёрный список")
+		case !removed:
+			c.reply(ctx, msg, fmt.Sprintf("%d нет в чёрном списке", target.ID))
+		default:
+			c.reply(ctx, msg, fmt.Sprintf("%s (%d) убран из чёрного списка", target.Name, target.ID))
+		}
+	}
+}
+
+func banTarget(msg *models.Message, args string) (imposter.Player, bool) {
+	if id, err := strconv.ParseInt(strings.TrimSpace(args), 10, 64); err == nil {
+		return imposter.Player{ID: id, Name: strconv.FormatInt(id, 10)}, true
+	}
+	if r := msg.ReplyToMessage; r != nil && r.From != nil && r.ForumTopicCreated == nil {
+		return playerFrom(r.From), true
+	}
+	return imposter.Player{}, false
+}
+
+func (c *imposterController) blacklistText() string {
+	list := c.store.Blacklist()
+	if len(list) == 0 {
+		return "Чёрный список пуст.\n\n" + banUsage
+	}
+	ids := slices.Sorted(maps.Keys(list))
+	var b strings.Builder
+	b.WriteString("Чёрный список:\n")
+	for _, id := range ids {
+		fmt.Fprintf(&b, "- %s (%d)\n", list[id], id)
+	}
+	return b.String() + "\n" + banUsage
 }

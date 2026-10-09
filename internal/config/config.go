@@ -11,6 +11,7 @@ import (
 
 type Config struct {
 	BotToken                string `env:"BOT_TOKEN,required"`
+	OwnerID                 int64  `env:"OWNER_ID"`
 	SouchastnikURL          string `env:"SOUCHASTNIK_URL"`
 	SouchastnikTimeout      int    `env:"SOUCHASTNIK_TIMEOUT_SECONDS" envDefault:"30"`
 	YtdlpEnabled            bool   `env:"YT_DLP_ENABLED" envDefault:"false"`
@@ -20,6 +21,8 @@ type Config struct {
 	YtdlpCookiesFromBrowser string `env:"YT_DLP_COOKIES_FROM_BROWSER"`
 	ImposterStateFile       string `env:"IMPOSTER_STATE_FILE" envDefault:"data/imposter.json"`
 	WordsDownloadedFile     string `env:"WORDS_DOWNLOADED_FILE" envDefault:"words_downloaded.txt"`
+	MessageLogDir           string `env:"MESSAGE_LOG_DIR" envDefault:"data/messages"`
+	MessageLogMaxMB         int64  `env:"MESSAGE_LOG_MAX_MB" envDefault:"1024"`
 }
 
 func Load() (Config, error) {
