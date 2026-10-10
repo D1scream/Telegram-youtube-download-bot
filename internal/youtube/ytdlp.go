@@ -90,6 +90,10 @@ func (y *ytdlp) download(ctx context.Context, pageURL, format, outputTemplate st
 		"--print", "after_move:filepath",
 	}
 	args = append(args, extraArgs...)
+	if url, section, ok := strings.Cut(pageURL, " "); ok {
+		pageURL = url
+		args = append(args, "--download-sections", "*"+strings.TrimSpace(section), "--force-keyframes-at-cuts")
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, ytdlpDownloadTimeout)
 	defer cancel()
