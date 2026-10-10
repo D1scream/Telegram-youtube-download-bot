@@ -76,8 +76,8 @@ func messageCommandLine(msg *models.Message) string {
 }
 
 const helpMessage = `Команды
-/ytm <URL> - аудио с YouTube
-/ytv <URL> - видео с YouTube
+/ytm <URL> [1:20-2:45] - аудио с YouTube, можно отрезок
+/ytv <URL> [1:20-2:45] - видео с YouTube, можно отрезок
 /check <текст> - проверка текста
 /imposter - игра "Импостер". Команды /imposter_settings, /imposter_stop, /word`
 
