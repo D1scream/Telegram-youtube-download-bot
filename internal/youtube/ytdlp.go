@@ -16,17 +16,11 @@ import (
 const ytdlpDownloadTimeout = 30 * time.Minute
 
 type ytdlp struct {
-	bin            string
-	cookiesFile    string
-	cookiesBrowser string
-	outputDir      string
+	cookiesFile string
+	outputDir   string
 }
 
 func newYtdlp(cfg Config) (*ytdlp, error) {
-	bin, err := resolveYtdlpBin(cfg.Bin)
-	if err != nil {
-		return nil, err
-	}
 	outDir := strings.TrimSpace(cfg.DownloadDir)
 	if outDir == "" {
 		outDir = "yt_downloads"
@@ -34,37 +28,7 @@ func newYtdlp(cfg Config) (*ytdlp, error) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return nil, fmt.Errorf("создать каталог yt-dlp: %w", err)
 	}
-	return &ytdlp{
-		bin:            bin,
-		cookiesFile:    cfg.CookiesFile,
-		cookiesBrowser: cfg.CookiesBrowser,
-		outputDir:      outDir,
-	}, nil
-}
-
-func resolveYtdlpBin(bin string) (string, error) {
-	bin = strings.TrimSpace(bin)
-	if bin == "" {
-		bin = "yt-dlp"
-	}
-	if looksLikePath(bin) {
-		if _, err := os.Stat(bin); err == nil {
-			return bin, nil
-		}
-		if path, err := exec.LookPath("yt-dlp"); err == nil {
-			return path, nil
-		}
-		return "", fmt.Errorf("yt-dlp не найден (%s)", bin)
-	}
-	path, err := exec.LookPath(bin)
-	if err != nil {
-		return "", fmt.Errorf("yt-dlp не найден (%s): %w", bin, err)
-	}
-	return path, nil
-}
-
-func looksLikePath(bin string) bool {
-	return filepath.IsAbs(bin) || strings.ContainsAny(bin, `/\`)
+	return &ytdlp{cookiesFile: cfg.CookiesFile, outputDir: outDir}, nil
 }
 
 type downloadResult struct {
@@ -135,7 +99,7 @@ func (y *ytdlp) attempt(ctx context.Context, args []string, outputTemplate, page
 	}
 	args = append(args, "-o", filepath.Join(workDir, outputTemplate), pageURL)
 
-	cmd := exec.CommandContext(ctx, y.bin, args...)
+	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -160,28 +124,16 @@ func (y *ytdlp) attempt(ctx context.Context, args []string, outputTemplate, page
 }
 
 func (y *ytdlp) hasCookies() bool {
-	if file := strings.TrimSpace(y.cookiesFile); file != "" {
-		if _, err := os.Stat(file); err == nil {
-			return true
-		}
-	}
-	return strings.TrimSpace(y.cookiesBrowser) != ""
+	_, err := os.Stat(y.cookiesFile)
+	return err == nil
 }
 
 func (y *ytdlp) cookieArgs(workDir string) ([]string, error) {
-	if file := strings.TrimSpace(y.cookiesFile); file != "" {
-		if _, err := os.Stat(file); err == nil {
-			writable := filepath.Join(workDir, "cookies.txt")
-			if err := copyFile(file, writable); err != nil {
-				return nil, fmt.Errorf("скопировать cookies: %w", err)
-			}
-			return []string{"--cookies", writable}, nil
-		}
+	writable := filepath.Join(workDir, "cookies.txt")
+	if err := copyFile(y.cookiesFile, writable); err != nil {
+		return nil, fmt.Errorf("скопировать cookies: %w", err)
 	}
-	if browser := strings.TrimSpace(y.cookiesBrowser); browser != "" {
-		return []string{"--cookies-from-browser", browser}, nil
-	}
-	return nil, nil
+	return []string{"--cookies", writable}, nil
 }
 
 func lastNonEmptyLine(s string) string {

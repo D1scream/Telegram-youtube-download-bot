@@ -55,11 +55,7 @@ func cliMessages(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	entries, err := msglog.Read(cfg.MessageLogDir, msglog.Filter{
+	entries, err := msglog.Read(messageLogDir, msglog.Filter{
 		ChatID: *chatID, From: *from, Contains: *grep, Last: *n, IncludeDeleted: *withDeleted,
 	})
 	if err != nil {
@@ -103,7 +99,7 @@ func cliDelete(args []string) error {
 	if err != nil {
 		return err
 	}
-	entries, err := msglog.Read(cfg.MessageLogDir, msglog.Filter{
+	entries, err := msglog.Read(messageLogDir, msglog.Filter{
 		ChatID: *chatID, From: *from, Contains: *grep, Last: *last, IDs: ids,
 	})
 	if err != nil {
@@ -142,7 +138,7 @@ func cliDelete(args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	deleted, errs := tg.DeleteMessages(ctx, *chatID, ids)
-	if err := msglog.MarkDeleted(cfg.MessageLogDir, *chatID, deleted); err != nil {
+	if err := msglog.MarkDeleted(messageLogDir, *chatID, deleted); err != nil {
 		fmt.Fprintln(os.Stderr, "Ошибка:", err)
 	}
 	for _, err := range errs {

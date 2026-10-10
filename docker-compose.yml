@@ -5,7 +5,6 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      YT_DLP_ENABLED: "true"
       YT_DLP_DOWNLOAD_DIR: /app/yt_downloads
       YT_DLP_COOKIES_FILE: /app/secrets/youtube_cookies.txt
     volumes:

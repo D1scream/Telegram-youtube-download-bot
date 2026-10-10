@@ -166,22 +166,10 @@ func (h *Handler) reply(ctx context.Context, msg *models.Message, text string) {
 }
 
 func (h *Handler) handleYtm(ctx context.Context, msg *models.Message, url string) {
-	if h.youtube == nil {
-		if _, err := h.tg.ReplyToChat(ctx, msg.Chat.ID, msg.ID, "YouTube недоступен (yt-dlp не настроен)"); err != nil {
-			h.logger.ErrorContext(ctx, "Не удалось отправить ответ ytm", "err", err)
-		}
-		return
-	}
 	h.youtube.DownloadMusic(ctx, msg.Chat.ID, msg.ID, url)
 }
 
 func (h *Handler) handleYtv(ctx context.Context, msg *models.Message, url string) {
-	if h.youtube == nil {
-		if _, err := h.tg.ReplyToChat(ctx, msg.Chat.ID, msg.ID, "YouTube недоступен (yt-dlp не настроен)"); err != nil {
-			h.logger.ErrorContext(ctx, "Не удалось отправить ответ ytv", "err", err)
-		}
-		return
-	}
 	h.youtube.DownloadVideo(ctx, msg.Chat.ID, msg.ID, url)
 }
 
