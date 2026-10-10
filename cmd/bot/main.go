@@ -15,6 +15,13 @@ import (
 	"telegram-bot/internal/youtube"
 )
 
+const (
+	imposterStateFile  = "data/imposter.json"
+	wordsFile          = "words_downloaded.txt"
+	messageLogDir      = "data/messages"
+	messageLogMaxBytes = 1024 * 1024 * 1024
+)
+
 func main() {
 	if len(os.Args) > 1 {
 		os.Exit(runCLI(os.Args[1:]))
@@ -39,7 +46,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	msgLog, err := msglog.Open(cfg.MessageLogDir, cfg.MessageLogMaxMB*1024*1024)
+	msgLog, err := msglog.Open(messageLogDir, messageLogMaxBytes)
 	if err != nil {
 		logger.Error("Ошибка открытия лога сообщений", "err", err)
 		os.Exit(1)
@@ -47,20 +54,30 @@ func main() {
 	defer msgLog.Close()
 	tg.SetMessageLog(msgLog, logger)
 
-	bank, err := newWordList(cfg, logger)
+	bank, err := imposter.LoadWordList(wordsFile)
 	if err != nil {
 		logger.Error("Ошибка загрузки банка слов", "err", err)
+		os.Exit(1)
+	}
+	logger.Info("Банк слов загружен", "words", bank.Len())
+
+	yt, err := youtube.New(youtube.Config{
+		DownloadDir: cfg.YtdlpDownloadDir,
+		CookiesFile: cfg.YtdlpCookiesFile,
+	}, tg, logger)
+	if err != nil {
+		logger.Error("Ошибка инициализации YouTube", "err", err)
 		os.Exit(1)
 	}
 
 	logger.Info("Telegram polling запущен")
 	checker := newSouchastnik(cfg, logger)
-	store, err := imposter.OpenStore(cfg.ImposterStateFile)
+	store, err := imposter.OpenStore(imposterStateFile)
 	if err != nil {
 		logger.Error("Ошибка загрузки состояния игры", "err", err)
 		os.Exit(1)
 	}
-	handler := telegram.NewHandler(newYouTube(cfg, tg, logger), checker, tg, bank, store, cfg.OwnerID, logger)
+	handler := telegram.NewHandler(yt, checker, tg, bank, store, cfg.OwnerID, logger)
 	if err := tg.Start(ctx, handler.HandleMessage, handler.HandleCallback); err != nil {
 		logger.Error("Telegram polling завершился с ошибкой", "err", err)
 		os.Exit(1)
@@ -78,32 +95,4 @@ func newSouchastnik(cfg config.Config, logger *slog.Logger) *souchastnik.Client 
 		URL:            cfg.SouchastnikURL,
 		TimeoutSeconds: cfg.SouchastnikTimeout,
 	})
-}
-
-func newYouTube(cfg config.Config, tg *telegram.Bot, logger *slog.Logger) *youtube.Service {
-	if !cfg.YtdlpEnabled {
-		logger.Info("YouTube /ytm /ytv отключены (YT_DLP_ENABLED=false)")
-		return nil
-	}
-	yt, err := youtube.New(youtube.Config{
-		Bin:            cfg.YtdlpPath,
-		DownloadDir:    cfg.YtdlpDownloadDir,
-		CookiesFile:    cfg.YtdlpCookiesFile,
-		CookiesBrowser: cfg.YtdlpCookiesFromBrowser,
-	}, tg, logger)
-	if err != nil {
-		logger.Error("YouTube отключён", "err", err)
-		return nil
-	}
-	logger.Info("YouTube /ytm /ytv включены", "cookies_file", cfg.YtdlpCookiesFile, "cookies_browser", cfg.YtdlpCookiesFromBrowser)
-	return yt
-}
-
-func newWordList(cfg config.Config, logger *slog.Logger) (*imposter.WordList, error) {
-	words, err := imposter.LoadWordList(cfg.WordsDownloadedFile)
-	if err != nil {
-		return nil, err
-	}
-	logger.Info("Банк слов загружен", "words", words.Len())
-	return words, nil
 }

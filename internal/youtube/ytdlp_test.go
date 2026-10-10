@@ -18,21 +18,3 @@ func TestLastNonEmptyLine(t *testing.T) {
 		}
 	}
 }
-
-func TestLooksLikePath(t *testing.T) {
-	tests := []struct {
-		in   string
-		want bool
-	}{
-		{"yt-dlp", false},
-		{"/usr/bin/yt-dlp", true},
-		{`C:\tools\yt-dlp.exe`, true},
-		{`bin\yt-dlp`, true},
-		{"./yt-dlp", true},
-	}
-	for _, tt := range tests {
-		if got := looksLikePath(tt.in); got != tt.want {
-			t.Fatalf("looksLikePath(%q) = %v, want %v", tt.in, got, tt.want)
-		}
-	}
-}

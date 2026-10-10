@@ -16,10 +16,8 @@ const (
 )
 
 type Config struct {
-	Bin            string
-	DownloadDir    string
-	CookiesFile    string
-	CookiesBrowser string
+	DownloadDir string
+	CookiesFile string
 }
 
 type Messenger interface {
@@ -89,14 +87,7 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 	result, err := job.download(workCtx, pageURL)
 	if err != nil {
 		s.logger.ErrorContext(workCtx, "yt-dlp ошибка", "url", pageURL, "err", err)
-		if _, replyErr := s.messenger.ReplyToChat(
-			workCtx,
-			job.chatID,
-			job.messageID,
-			fmt.Sprintf("Не удалось скачать: %s", err),
-		); replyErr != nil {
-			s.logger.ErrorContext(workCtx, "Не удалось отправить ответ YouTube", "err", replyErr)
-		}
+		s.reply(workCtx, job, fmt.Sprintf("Не удалось скачать: %s", err))
 		return
 	}
 	path := result.path
@@ -107,49 +98,22 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 		s.reply(workCtx, job, "YouTube отклонил cookies, файл скачан без них. ")
 	}
 
-	info, err := os.Stat(path)
-	if err != nil {
-		if _, replyErr := s.messenger.ReplyToChat(
-			workCtx,
-			job.chatID,
-			job.messageID,
-			"Файл скачан, но не найден на диске",
-		); replyErr != nil {
-			s.logger.ErrorContext(workCtx, "Не удалось отправить ответ YouTube", "err", replyErr)
-		}
-		return
-	}
-
-	if info.Size() > telegramMaxUploadBytes {
-		s.sendFileshareLink(workCtx, job, path, info.Size())
-		return
-	}
-
 	file, err := os.Open(path)
 	if err != nil {
-		if _, replyErr := s.messenger.ReplyToChat(
-			workCtx,
-			job.chatID,
-			job.messageID,
-			"Не удалось открыть файл для отправки",
-		); replyErr != nil {
-			s.logger.ErrorContext(workCtx, "Не удалось отправить ответ YouTube", "err", replyErr)
-		}
+		s.reply(workCtx, job, "Не удалось открыть файл для отправки")
 		return
 	}
 	defer file.Close()
 
+	if info, err := file.Stat(); err == nil && info.Size() > telegramMaxUploadBytes {
+		s.sendFileshareLink(workCtx, job, path, info.Size())
+		return
+	}
+
 	name := filepath.Base(path)
 	if _, sendErr := job.send(workCtx, job.chatID, 0, name, file); sendErr != nil {
 		s.logger.ErrorContext(workCtx, "Не удалось отправить файл YouTube", "path", path, "err", sendErr)
-		if _, replyErr := s.messenger.ReplyToChat(
-			workCtx,
-			job.chatID,
-			job.messageID,
-			"Скачано, но не удалось отправить в Telegram",
-		); replyErr != nil {
-			s.logger.ErrorContext(workCtx, "Не удалось отправить ответ YouTube", "err", replyErr)
-		}
+		s.reply(workCtx, job, "Скачано, но не удалось отправить в Telegram")
 		return
 	}
 
