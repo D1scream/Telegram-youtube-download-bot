@@ -29,6 +29,7 @@ type Entry struct {
 	Name      string    `json:"name,omitempty"`
 	Kind      string    `json:"kind,omitempty"`
 	Text      string    `json:"text,omitempty"`
+	FileID    string    `json:"file_id,omitempty"`
 	Deleted   bool      `json:"-"`
 }
 

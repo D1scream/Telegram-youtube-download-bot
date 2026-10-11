@@ -823,8 +823,8 @@ func tieLabel(t imposter.TiePolicy) string {
 const bannedText = "Ты забанен"
 
 const banUsage = `Чёрный список
-/imposter_ban - ответом на сообщение игрока или /imposter_ban <id>
-/imposter_unban - ответом на сообщение или /imposter_unban <id>
+/imposter_ban - ответом на сообщение игрока или /imposter_ban <@ник, имя или id>
+/imposter_unban - ответом на сообщение или /imposter_unban <@ник, имя или id>
 /imposter_ban без аргументов - показать список`
 
 func (c *imposterController) handleBan(ctx context.Context, msg *models.Message, args string, ban bool) {
@@ -840,7 +840,7 @@ func (c *imposterController) handleBan(ctx context.Context, msg *models.Message,
 		return
 	}
 
-	target, ok := banTarget(msg, args)
+	target, ok := c.banTarget(msg, args)
 	switch {
 	case !ok && ban && strings.TrimSpace(args) == "":
 		c.reply(ctx, msg, c.blacklistText())
@@ -869,8 +869,12 @@ func (c *imposterController) handleBan(ctx context.Context, msg *models.Message,
 	}
 }
 
-func banTarget(msg *models.Message, args string) (imposter.Player, bool) {
-	if id, err := strconv.ParseInt(strings.TrimSpace(args), 10, 64); err == nil {
+func (c *imposterController) banTarget(msg *models.Message, args string) (imposter.Player, bool) {
+	args = strings.TrimSpace(args)
+	if e, ok := c.tg.msgLog.Find(args); ok {
+		return imposter.Player{ID: e.FromID, Name: e.Author()}, true
+	}
+	if id, err := strconv.ParseInt(args, 10, 64); err == nil {
 		return imposter.Player{ID: id, Name: strconv.FormatInt(id, 10)}, true
 	}
 	if r := msg.ReplyToMessage; r != nil && r.From != nil && r.ForumTopicCreated == nil {
@@ -888,7 +892,11 @@ func (c *imposterController) blacklistText() string {
 	var b strings.Builder
 	b.WriteString("Чёрный список:\n")
 	for _, id := range ids {
-		fmt.Fprintf(&b, "- %s (%d)\n", list[id], id)
+		name := list[id]
+		if e, ok := c.tg.msgLog.Find(strconv.FormatInt(id, 10)); ok {
+			name = e.Author()
+		}
+		fmt.Fprintf(&b, "- %s (%d)\n", name, id)
 	}
 	return b.String() + "\n" + banUsage
 }
