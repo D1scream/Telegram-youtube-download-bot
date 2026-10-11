@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,12 +18,16 @@ import (
 	"telegram-bot/internal/transport/telegram"
 )
 
+const mediaDir = "data/media"
+
 const cliUsage = `Использование:
   bot messages [-chat ID] [-from USER] [-grep TEXT] [-n 20] [-deleted]
-      показать сообщения из лога
+      показать сообщения из лога в JSON
   bot delete -chat ID -last N [-from USER] [-grep TEXT] [-yes]
   bot delete -chat ID -ids 101,102,110-115 [-yes]
-      удалить сообщения из чата; без -yes спрашивает подтверждение`
+      удалить сообщения из чата; без -yes спрашивает подтверждение
+  bot media -chat ID -ids 101,102,110-115
+      скачать фото, видео и другие файлы из сообщений в data/media`
 
 func runCLI(args []string) int {
 	var err error
@@ -31,6 +36,8 @@ func runCLI(args []string) int {
 		err = cliMessages(args[1:])
 	case "delete":
 		err = cliDelete(args[1:])
+	case "media":
+		err = cliMedia(args[1:])
 	default:
 		fmt.Fprintln(os.Stderr, cliUsage)
 		return 2
@@ -61,11 +68,10 @@ func cliMessages(args []string) error {
 	if err != nil {
 		return err
 	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
 	for _, e := range entries {
-		fmt.Println(formatEntry(e))
-	}
-	if len(entries) == 0 {
-		fmt.Println("Сообщений не найдено")
+		enc.Encode(e)
 	}
 	return nil
 }
@@ -147,6 +153,52 @@ func cliDelete(args []string) error {
 	fmt.Printf("Удалено: %d из %d\n", len(deleted), len(ids))
 	if len(errs) > 0 {
 		return fmt.Errorf("не удалось удалить %d сообщений", len(errs))
+	}
+	return nil
+}
+
+func cliMedia(args []string) error {
+	fs := flag.NewFlagSet("media", flag.ContinueOnError)
+	chatID := fs.Int64("chat", 0, "id чата (обязательно)")
+	idsText := fs.String("ids", "", "id сообщений через запятую, можно диапазоны 10-15")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ids, err := parseIDs(*idsText)
+	if err != nil {
+		return err
+	}
+	if *chatID == 0 || len(ids) == 0 {
+		return errors.New("нужны -chat и -ids")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	entries, err := msglog.Read(messageLogDir, msglog.Filter{ChatID: *chatID, IDs: ids, IncludeDeleted: true})
+	if err != nil {
+		return err
+	}
+	tg, err := telegram.New(cfg.BotToken)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	for _, e := range entries {
+		if e.FileID == "" {
+			fmt.Printf("id=%d  нет файла в логе\n", e.MessageID)
+			continue
+		}
+		path, err := tg.DownloadFile(ctx, e.FileID, mediaDir, fmt.Sprintf("%d_%d", -e.ChatID, e.MessageID))
+		if err != nil {
+			fmt.Printf("id=%d  %v\n", e.MessageID, err)
+			continue
+		}
+		fmt.Println(path)
+	}
+	if len(entries) == 0 {
+		fmt.Println("Сообщений не найдено")
 	}
 	return nil
 }

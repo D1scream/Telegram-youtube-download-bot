@@ -152,3 +152,15 @@ func MarkDeleted(dir string, chatID int64, ids []int) error {
 	}
 	return nil
 }
+
+func (w *Writer) Find(from string) (Entry, bool) {
+	entries, _ := Read(w.dir, Filter{From: from, Last: 1, IncludeDeleted: true})
+	if from == "" || len(entries) == 0 || entries[0].FromID == 0 {
+		return Entry{}, false
+	}
+	return entries[0], true
+}
+
+func (e Entry) Author() string {
+	return strings.TrimSpace(strings.TrimSuffix(e.Name+" @"+e.From, " @"))
+}
