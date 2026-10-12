@@ -208,7 +208,7 @@ func (s *Store) AddTopicWords(name string, words []string) (int, error) {
 	have := slices.Clone(s.topics[key])
 	added := 0
 	for _, w := range words {
-		if slices.Contains(have, w) {
+		if containsWord(have, w) {
 			continue
 		}
 		if len(have) >= MaxTopicWords {
@@ -230,8 +230,13 @@ func (s *Store) RemoveTopicWords(name string, words []string) (int, error) {
 		return 0, ErrNoTopic
 	}
 	before := len(s.topics[key])
-	s.topics[key] = slices.DeleteFunc(slices.Clone(s.topics[key]), func(w string) bool { return slices.Contains(words, w) })
+	s.topics[key] = slices.DeleteFunc(slices.Clone(s.topics[key]), func(w string) bool { return containsWord(words, w) })
 	return before - len(s.topics[key]), s.save()
+}
+
+func containsWord(words []string, w string) bool {
+	w = Normalize(w)
+	return slices.ContainsFunc(words, func(x string) bool { return Normalize(x) == w })
 }
 
 func (s *Store) DeleteTopic(name string) error {

@@ -139,8 +139,8 @@ func (c *imposterController) stop(ctx context.Context, msg *models.Message) {
 const topicUsage = `Темы (свои списки слов для игры)
 /topic - список тем
 /topic show Название - слова темы
-/topic add Название: слово - добавить одно слово (тема создаётся сама)
-/topic remove Название: слово - убрать одно слово
+/topic add Название: слово, слово - добавить слова (тема создаётся сама)
+/topic remove Название: слово, слово - убрать слова
 /topic delete Название - удалить тему целиком
 Выбрать тему: /imposter_settings в группе, кнопка "Слова"`
 
@@ -186,32 +186,47 @@ func (c *imposterController) handleTopic(ctx context.Context, msg *models.Messag
 		return
 	}
 
-	word, ok := imposter.CleanWord(wordText)
-	if !hasWord || !ok {
-		c.reply(ctx, msg, fmt.Sprintf("Нужно ровно одно слово после двоеточия: /topic %s Название: слово", action))
+	words, bad := splitTopicWords(wordText)
+	if !hasWord || len(words)+len(bad) == 0 {
+		c.reply(ctx, msg, fmt.Sprintf("Нужны слова после двоеточия: /topic %s Название: слово, слово", action))
 		return
 	}
+	var text string
 	if action == "add" {
-		added, err := c.store.AddTopicWords(name, []string{word})
-		switch {
-		case err != nil:
+		added, err := c.store.AddTopicWords(name, words)
+		if err != nil {
 			c.reply(ctx, msg, "Не получилось: "+err.Error())
-		case added == 0:
-			c.reply(ctx, msg, fmt.Sprintf("Слово \"%s\" уже есть в теме \"%s\"", word, name))
-		default:
-			c.reply(ctx, msg, fmt.Sprintf("Слово \"%s\" добавлено в тему \"%s\"", word, name))
+			return
 		}
-		return
+		text = fmt.Sprintf("Тема \"%s\": добавлено слов: %d", name, added)
+	} else {
+		removed, err := c.store.RemoveTopicWords(name, words)
+		if err != nil {
+			c.reply(ctx, msg, "Не получилось: "+err.Error())
+			return
+		}
+		text = fmt.Sprintf("Тема \"%s\": убрано слов: %d", name, removed)
 	}
-	removed, err := c.store.RemoveTopicWords(name, []string{word})
-	switch {
-	case err != nil:
-		c.reply(ctx, msg, "Не получилось: "+err.Error())
-	case removed == 0:
-		c.reply(ctx, msg, fmt.Sprintf("Слова \"%s\" нет в теме \"%s\"", word, name))
-	default:
-		c.reply(ctx, msg, fmt.Sprintf("Слово \"%s\" убрано из темы \"%s\"", word, name))
+	if len(bad) > 0 {
+		text += "\nНе подошли (нужно одно слово без пробелов): " + strings.Join(bad, ", ")
 	}
+	c.reply(ctx, msg, text)
+}
+
+func splitTopicWords(text string) (words, bad []string) {
+	parts := strings.FieldsFunc(text, func(r rune) bool { return r == ',' || r == ';' || r == '\n' || r == '\r' })
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if word, ok := imposter.CleanWord(part); ok {
+			words = append(words, word)
+		} else {
+			bad = append(bad, part)
+		}
+	}
+	return words, bad
 }
 
 func (c *imposterController) topicList(ctx context.Context, msg *models.Message) {
