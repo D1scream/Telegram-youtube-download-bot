@@ -7,6 +7,9 @@ services:
     environment:
       YT_DLP_DOWNLOAD_DIR: /app/yt_downloads
       YT_DLP_COOKIES_FILE: /app/secrets/youtube_cookies.txt
+      FILESHARE_URL: http://31.207.45.254:8090
+    ports:
+      - "8090:8090"
     volumes:
       - ./secrets/youtube_cookies.txt:/app/secrets/youtube_cookies.txt:ro
       - ./yt_downloads:/app/yt_downloads

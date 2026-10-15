@@ -16,6 +16,7 @@ type Config struct {
 	SouchastnikTimeout int    `env:"SOUCHASTNIK_TIMEOUT_SECONDS" envDefault:"30"`
 	YtdlpDownloadDir   string `env:"YT_DLP_DOWNLOAD_DIR" envDefault:"yt_downloads"`
 	YtdlpCookiesFile   string `env:"YT_DLP_COOKIES_FILE"`
+	FileshareURL       string `env:"FILESHARE_URL"`
 }
 
 func Load() (Config, error) {
