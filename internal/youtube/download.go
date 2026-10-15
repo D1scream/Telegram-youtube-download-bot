@@ -16,8 +16,9 @@ const (
 )
 
 type Config struct {
-	DownloadDir string
-	CookiesFile string
+	DownloadDir  string
+	CookiesFile  string
+	FileshareURL string
 }
 
 type Messenger interface {
@@ -41,7 +42,7 @@ type downloadJob struct {
 
 type Service struct {
 	ytdlp     *ytdlp
-	fileshare *litterbox
+	fileshare *fileshare
 	messenger Messenger
 	logger    *slog.Logger
 }
@@ -51,12 +52,17 @@ func New(cfg Config, messenger Messenger, logger *slog.Logger) (*Service, error)
 	if err != nil {
 		return nil, err
 	}
-	return &Service{
+	s := &Service{
 		ytdlp:     dl,
-		fileshare: newLitterbox(),
 		messenger: messenger,
 		logger:    logger.With("component", "youtube_download"),
-	}, nil
+	}
+	if cfg.FileshareURL != "" {
+		if s.fileshare, err = startFileshare(filepath.Join(dl.outputDir, "share"), cfg.FileshareURL, s.logger); err != nil {
+			return nil, fmt.Errorf("запустить раздачу файлов: %w", err)
+		}
+	}
+	return s, nil
 }
 
 func (s *Service) DownloadMusic(ctx context.Context, chatID int64, messageID int, rawURL string) {
@@ -122,17 +128,14 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 
 func (s *Service) sendFileshareLink(ctx context.Context, job downloadJob, path string, size int64) {
 	sizeMB := float64(size) / (1024 * 1024)
-	if size > litterboxMaxUploadBytes {
-		s.reply(ctx, job, fmt.Sprintf("Файл слишком большой (%.1f MB): лимит Telegram 50 MB, файлообменника 1 GB", sizeMB))
+	if s.fileshare == nil {
+		s.reply(ctx, job, fmt.Sprintf("Файл слишком большой для Telegram (%.1f MB), а раздача файлов не настроена", sizeMB))
 		return
 	}
-
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fileshareUploadTimeout)
-	defer cancel()
-	link, err := s.fileshare.upload(ctx, path)
+	link, err := s.fileshare.publish(path)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "Не удалось загрузить файл на файлообменник", "path", path, "err", err)
-		s.reply(ctx, job, fmt.Sprintf("Файл слишком большой для Telegram (%.1f MB), а загрузить его на файлообменник не удалось", sizeMB))
+		s.logger.ErrorContext(ctx, "Не удалось выложить файл на раздачу", "path", path, "err", err)
+		s.reply(ctx, job, fmt.Sprintf("Файл слишком большой для Telegram (%.1f MB), а выложить его на раздачу не удалось", sizeMB))
 		return
 	}
 

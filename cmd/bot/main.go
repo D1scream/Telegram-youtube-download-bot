@@ -62,8 +62,9 @@ func main() {
 	logger.Info("Банк слов загружен", "words", bank.Len())
 
 	yt, err := youtube.New(youtube.Config{
-		DownloadDir: cfg.YtdlpDownloadDir,
-		CookiesFile: cfg.YtdlpCookiesFile,
+		DownloadDir:  cfg.YtdlpDownloadDir,
+		CookiesFile:  cfg.YtdlpCookiesFile,
+		FileshareURL: cfg.FileshareURL,
 	}, tg, logger)
 	if err != nil {
 		logger.Error("Ошибка инициализации YouTube", "err", err)
