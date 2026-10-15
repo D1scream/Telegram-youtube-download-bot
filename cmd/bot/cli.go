@@ -190,7 +190,7 @@ func cliMedia(args []string) error {
 			fmt.Printf("id=%d  нет файла в логе\n", e.MessageID)
 			continue
 		}
-		path, err := tg.DownloadFile(ctx, e.FileID, mediaDir, fmt.Sprintf("%d_%d", -e.ChatID, e.MessageID))
+		path, err := tg.DownloadFile(ctx, e.FileID, mediaDir, telegram.MediaName(e.ChatID, e.MessageID))
 		if err != nil {
 			fmt.Printf("id=%d  %v\n", e.MessageID, err)
 			continue

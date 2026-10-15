@@ -52,7 +52,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer msgLog.Close()
-	tg.SetMessageLog(msgLog, logger)
+	tg.SetMessageLog(msgLog, mediaDir, logger)
 
 	bank, err := imposter.LoadWordList(wordsFile)
 	if err != nil {

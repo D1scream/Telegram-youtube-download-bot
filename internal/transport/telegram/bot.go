@@ -26,6 +26,7 @@ type Bot struct {
 	onMessage  MessageHandler
 	onCallback CallbackHandler
 	msgLog     *msglog.Writer
+	mediaDir   string
 	logger     *slog.Logger
 }
 
@@ -64,6 +65,7 @@ func (t *Bot) handleUpdate(ctx context.Context, _ *bot.Bot, update *models.Updat
 		return
 	}
 	t.record(msg)
+	t.saveMedia(msg)
 	if t.onMessage != nil {
 		t.onMessage(ctx, msg)
 	}

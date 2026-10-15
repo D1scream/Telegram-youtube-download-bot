@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -18,11 +20,35 @@ import (
 	"telegram-bot/internal/msglog"
 )
 
-const deleteBatchSize = 100
+const (
+	deleteBatchSize      = 100
+	mediaDownloadTimeout = 5 * time.Minute
+)
 
-func (t *Bot) SetMessageLog(w *msglog.Writer, logger *slog.Logger) {
+func (t *Bot) SetMessageLog(w *msglog.Writer, mediaDir string, logger *slog.Logger) {
 	t.msgLog = w
+	t.mediaDir = mediaDir
 	t.logger = logger.With("component", "message_log")
+}
+
+// saveMedia скачивает вложение входящего сообщения в mediaDir в фоне.
+func (t *Bot) saveMedia(msg *models.Message) {
+	fileID := mediaFileID(msg)
+	if t.mediaDir == "" || fileID == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), mediaDownloadTimeout)
+		defer cancel()
+		if _, err := t.DownloadFile(ctx, fileID, t.mediaDir, MediaName(msg.Chat.ID, msg.ID)); err != nil {
+			t.logger.Error("Не удалось скачать вложение", "chat", msg.Chat.ID, "message", msg.ID, "err", err)
+		}
+	}()
+}
+
+// MediaName - имя файла вложения без расширения: <id чата без минуса>_<id сообщения>.
+func MediaName(chatID int64, messageID int) string {
+	return strings.TrimPrefix(strconv.FormatInt(chatID, 10), "-") + "_" + strconv.Itoa(messageID)
 }
 
 func (t *Bot) record(msg *models.Message) {
