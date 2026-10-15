@@ -1,11 +1,3 @@
-FROM golang:1.25-alpine AS build
-
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /bot ./cmd/bot
-
 FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates tzdata ffmpeg python3 py3-pip deno \
@@ -13,7 +5,7 @@ RUN apk add --no-cache ca-certificates tzdata ffmpeg python3 py3-pip deno \
  && ln -sf "$(command -v yt-dlp)" /usr/local/bin/yt-dlp
 
 WORKDIR /app
-COPY --from=build /bot /app/bot
+COPY --chmod=755 bot /app/bot
 COPY words_downloaded.txt /app/
 
 CMD ["/app/bot"]

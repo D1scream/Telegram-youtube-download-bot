@@ -7,3 +7,5 @@ souchastnik/model/
 souchastnik/original/
 data/
 deploy.sh
+ssh_pass.txt
+/bot
