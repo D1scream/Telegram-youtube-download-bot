@@ -114,43 +114,82 @@ func Quantize(exact []float64) []int {
 	return quanta
 }
 
-// RecomputeDelays переписывает задержки так, чтобы цикл длился ровно beats
-// битов; паттерн цикла повторяется, хвост масштабируется так же.
-// Возвращает задержки всех кадров (мс), итоговую длительность цикла
-// и подписанный прогноз дрейфа фазы (мс/мин).
-func RecomputeDelays(delays []int, cycle int, beatMs float64, beats int) (out []int, loopMs int, driftPerMin float64) {
-	target := minQuanta * cycle
-	if t := int(roundHalfEven(beatMs*float64(beats)/quantMs)) * quantMs; t > target {
-		target = t
-	}
-	sum := 0
-	for _, d := range delays[:cycle] {
-		sum += d
-	}
-	k := float64(target) / float64(sum)
-	reps := len(delays) / cycle
-	scaled := make([]float64, 0, cycle)
-	for _, d := range delays[:cycle] {
-		scaled = append(scaled, float64(d)*k)
-	}
-	pattern := Quantize(scaled)
-	out = make([]int, 0, len(delays))
-	for r := 0; r < reps; r++ {
-		out = append(out, pattern...)
-	}
-	if rest := len(delays) - reps*cycle; rest > 0 {
-		tail := make([]float64, 0, rest)
-		for _, d := range delays[reps*cycle:] {
-			tail = append(tail, float64(d)*k)
+// Пределы размножения цикла против дрейфа (unrollCopies).
+const (
+	maxFrames = 120 // кадров в файле
+	driftOK   = 10  // мс/мин: за 3 минуты трека — 30 мс, глазом не видно
+)
+
+// unrollCopies — сколько копий цикла записать, чтобы шаг 10 мс не копил
+// дрейф. Бит редко кратен 10 мс: при 160 BPM цикл 375 мс ложится как 370 мс,
+// и за минуту гифка уходит на 0.8 с. Копии с разным округлением (370 + 380)
+// в сумме дают ровно 2 цикла. Берётся наименьшее число копий с дрейфом
+// < driftOK, иначе — лучшее в пределах maxFrames кадров.
+// Возвращает число копий, квантов на все копии и дрейф (мс/мин).
+func unrollCopies(cycle int, exactMs float64) (copies, total int, drift float64) {
+	for c := 1; c <= max(1, maxFrames/cycle); c++ {
+		t := max(minQuanta*cycle*c, int(roundHalfEven(float64(c)*exactMs/quantMs)))
+		d := (float64(t*quantMs) - float64(c)*exactMs) * 60000 / float64(t*quantMs)
+		if c == 1 || math.Abs(d) < math.Abs(drift) {
+			copies, total, drift = c, t, d
 		}
-		out = append(out, Quantize(tail)...)
+		if math.Abs(d) < driftOK {
+			break
+		}
 	}
-	for i := range out {
-		out[i] *= quantMs // кванты -> мс
+	return copies, total, drift
+}
+
+// RecomputeDelays переписывает задержки так, чтобы цикл длился beats битов.
+// Без хвоста цикл записывается копиями (unrollCopies) — дрейф почти ноль;
+// с хвостом-неповтором кадры идут как в исходнике, паттерн цикла общий.
+// Возвращает задержки (мс) и индексы исходных кадров для каждого кадра
+// результата, среднюю длительность цикла и дрейф фазы (мс/мин).
+func RecomputeDelays(delays []int, cycle int, beatMs float64, beats int) (out, order []int, loopMs, driftPerMin float64) {
+	cycleMs := 0
+	for _, d := range delays[:cycle] {
+		cycleMs += d
 	}
-	drift := float64(target) - beatMs*float64(beats)
-	driftPerMin = drift * 60000 / float64(target)
-	return out, target, driftPerMin
+	exact := beatMs * float64(beats)
+	scale := func(src []int, k float64, times int) []float64 {
+		res := make([]float64, 0, len(src)*times)
+		for range times {
+			for _, d := range src {
+				res = append(res, float64(d)*k)
+			}
+		}
+		return res
+	}
+	var quanta []int
+	copies, total := 1, 0
+	if len(delays)%cycle != 0 {
+		total = max(minQuanta*cycle, int(roundHalfEven(exact/quantMs)))
+		driftPerMin = (float64(total*quantMs) - exact) * 60000 / float64(total*quantMs)
+		k := float64(total*quantMs) / float64(cycleMs)
+		reps := len(delays) / cycle
+		quanta = Quantize(scale(delays[:cycle], k, 1))
+		for range reps - 1 {
+			quanta = append(quanta, quanta[:cycle]...)
+		}
+		quanta = append(quanta, Quantize(scale(delays[reps*cycle:], k, 1))...)
+		for i := range delays {
+			order = append(order, i)
+		}
+	} else {
+		copies, total, driftPerMin = unrollCopies(cycle, exact)
+		k := float64(total*quantMs) / float64(copies*cycleMs)
+		quanta = Quantize(scale(delays[:cycle], k, copies))
+		for range copies {
+			for i := range cycle {
+				order = append(order, i)
+			}
+		}
+	}
+	out = make([]int, len(quanta))
+	for i, q := range quanta {
+		out[i] = q * quantMs
+	}
+	return out, order, float64(total*quantMs) / float64(copies), driftPerMin
 }
 
 // Fit — полный расчёт синхронизации цикла GIF под BPM.
@@ -160,14 +199,16 @@ type Fit struct {
 	Frames      int     // кадров в цикле
 	Beats       int     // битов на цикл после подгонки
 	Adjusted    bool    // заданные биты перестроены, чтобы попасть в коридор
-	LoopMs      int     // итоговая длительность цикла, мс
+	Copies      int     // копий цикла в файле (против дрейфа)
+	LoopMs      float64 // средняя длительность цикла, мс
 	Speed       float64 // ×0.526 — множитель скорости
 	DriftPerMin float64 // накопление ошибки фазы, мс в минуту
-	Delays      []int   // новые задержки всех кадров, мс
+	Delays      []int   // задержки кадров результата, мс
+	Order       []int   // индекс исходного кадра для каждого кадра результата
 }
 
 // FitGIF подбирает сетку битов (beats <= 0 — авто) и пересчитывает задержки.
-// speedMin/speedMax — коридор скорости (в Python-версии 0.5 и 2.0).
+// speedMin/speedMax — коридор скорости (в Python-версии 0.9 и 2.0).
 func FitGIF(delays []int, cycle int, bpm float64, speedMin, speedMax float64, beats int) Fit {
 	beatMs := 60000 / bpm
 	cycleMs := 0.0
@@ -183,17 +224,19 @@ func FitGIF(delays []int, cycle int, bpm float64, speedMin, speedMax float64, be
 	} else {
 		beats = ChooseBeatsLowDrift(cycleMs, beatMs, speedMin, speedMax)
 	}
-	out, loopMs, drift := RecomputeDelays(delays, cycle, beatMs, beats)
+	out, order, loopMs, drift := RecomputeDelays(delays, cycle, beatMs, beats)
 	return Fit{
 		BeatMs:      beatMs,
 		CycleMs:     cycleMs,
 		Frames:      cycle,
 		Beats:       beats,
 		Adjusted:    adjusted,
+		Copies:      len(order) / cycle,
 		LoopMs:      loopMs,
-		Speed:       cycleMs / float64(loopMs),
+		Speed:       cycleMs / loopMs,
 		DriftPerMin: drift,
 		Delays:      out,
+		Order:       order,
 	}
 }
 

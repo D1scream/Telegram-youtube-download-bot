@@ -18,16 +18,18 @@ type Handler struct {
 	tg       *Bot
 	imposter *imposterController
 	history  *history
+	gifs     *GIFQueue
 	logger   *slog.Logger
 }
 
-func NewHandler(yt *youtube.Service, checker *souchastnik.Client, tg *Bot, bank *imposter.WordList, store *imposter.Store, ownerID int64, logger *slog.Logger) *Handler {
+func NewHandler(yt *youtube.Service, checker *souchastnik.Client, tg *Bot, bank *imposter.WordList, store *imposter.Store, gifs *GIFQueue, ownerID int64, logger *slog.Logger) *Handler {
 	return &Handler{
 		youtube:  yt,
 		checker:  checker,
 		tg:       tg,
 		imposter: newImposterController(tg, bank, store, ownerID, logger),
 		history:  newHistory(),
+		gifs:     gifs,
 		logger:   logger.With("component", "telegram_handler"),
 	}
 }
@@ -47,6 +49,10 @@ func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 		h.handleYtv(ctx, msg, args)
 	case isCommand(cmd, "bpm"):
 		h.handleBPM(ctx, msg, args)
+	case isCommand(cmd, "agif_list"), isCommand(cmd, "agif-list"):
+		h.handleAGIFList(ctx, msg)
+	case isCommand(cmd, "agif"):
+		h.handleAGIF(ctx, msg, args)
 	case isCommand(cmd, "check"):
 		h.handleCheck(ctx, msg, args)
 	case isCommand(cmd, "start"):
@@ -83,6 +89,7 @@ const helpMessage = `Команды
 /ytm <URL> [1:20-2:45] - аудио с YouTube, можно отрезок
 /ytv <URL> [1:20-2:45] - видео с YouTube, можно отрезок
 /bpm - ответом на музыку: гифка в такт (в личке достаточно прислать трек); /bpm <BPM> [битов] - под заданный BPM
+/agif [имя] - следующая гифка (или выбранная) под BPM предыдущей песни; /agif_list - список гифок
 /check <текст> - проверка текста
 /imposter - игра "Импостер". Команды /imposter_settings, /imposter_stop, /word`
 
