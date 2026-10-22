@@ -121,38 +121,38 @@ func Delays(src []byte) ([]int, error) {
 	return out, nil
 }
 
-// Patch переписывает задержки кадров (мс), пиксели не трогает. Кадрам без
-// GCE он добавляется. Если задержек меньше, чем кадров, лишние кадры в конце
-// файла отбрасываются (обрезка хвоста-дубликата).
-func Patch(src []byte, delays []int) ([]byte, error) {
+// Patch собирает GIF из кадров исходника в порядке order (кадр может
+// повторяться — так цикл размножается против дрейфа) с задержками delays (мс).
+// Пиксели не трогаются: блоки кадров копируются как есть, меняются только
+// байты задержки; кадрам без GCE он добавляется.
+func Patch(src []byte, order, delays []int) ([]byte, error) {
 	l, err := scanGIF(src)
 	if err != nil {
 		return nil, err
 	}
-	if len(delays) == 0 || len(delays) > len(l.frames) {
-		return nil, fmt.Errorf("задержек %d, а кадров в GIF %d", len(delays), len(l.frames))
+	if len(order) == 0 || len(order) != len(delays) {
+		return nil, fmt.Errorf("кадров %d, задержек %d", len(order), len(delays))
 	}
-	end := l.trailer
-	if len(delays) < len(l.frames) {
-		end = l.frames[len(delays)].start
-	}
-	out := make([]byte, 0, end+8*len(delays)+1)
-	prev := 0
-	for i, ms := range delays {
-		f := l.frames[i]
-		h := min(int(roundHalfEven(float64(max(ms, minQuanta*quantMs))/quantMs)), 0xFFFF)
-		lo, hi := byte(h), byte(h>>8)
+	out := append(make([]byte, 0, len(src)), src[:l.frames[0].start]...)
+	for j, idx := range order {
+		if idx < 0 || idx >= len(l.frames) {
+			return nil, fmt.Errorf("кадра %d нет в GIF (%d кадров)", idx+1, len(l.frames))
+		}
+		f := l.frames[idx]
+		end := l.trailer
+		if idx+1 < len(l.frames) {
+			end = l.frames[idx+1].start
+		}
+		h := min(int(roundHalfEven(float64(max(delays[j], minQuanta*quantMs))/quantMs)), 0xFFFF)
 		if f.delay >= 0 {
-			out = append(out, src[prev:f.delay]...)
-			out = append(out, lo, hi)
-			prev = f.delay + 2
+			out = append(out, src[f.start:f.delay]...)
+			out = append(out, byte(h), byte(h>>8))
+			out = append(out, src[f.delay+2:end]...)
 		} else {
-			out = append(out, src[prev:f.desc]...)
-			out = append(out, 0x21, 0xF9, 0x04, 0x00, lo, hi, 0x00, 0x00)
-			prev = f.desc
+			out = append(out, 0x21, 0xF9, 0x04, 0x00, byte(h), byte(h>>8), 0x00, 0x00)
+			out = append(out, src[f.desc:end]...)
 		}
 	}
-	out = append(out, src[prev:end]...)
 	out = append(out, 0x3B)
 	copy(out, "GIF89a") // GCE появился только в 89a
 	return out, nil

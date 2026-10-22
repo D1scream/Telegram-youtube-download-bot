@@ -17,6 +17,8 @@ import (
 
 const (
 	imposterStateFile  = "data/imposter.json"
+	gifsDir            = "data/gifs"
+	gifQueueFile       = "data/gif_queue.json"
 	wordsFile          = "words_downloaded.txt"
 	messageLogDir      = "data/messages"
 	messageLogMaxBytes = 1024 * 1024 * 1024
@@ -78,7 +80,12 @@ func main() {
 		logger.Error("Ошибка загрузки состояния игры", "err", err)
 		os.Exit(1)
 	}
-	handler := telegram.NewHandler(yt, checker, tg, bank, store, cfg.OwnerID, logger)
+	gifs, err := telegram.OpenGIFQueue(gifsDir, gifQueueFile)
+	if err != nil {
+		logger.Error("Ошибка загрузки очереди гифок", "err", err)
+		os.Exit(1)
+	}
+	handler := telegram.NewHandler(yt, checker, tg, bank, store, gifs, cfg.OwnerID, logger)
 	if err := tg.Start(ctx, handler.HandleMessage, handler.HandleCallback); err != nil {
 		logger.Error("Telegram polling завершился с ошибкой", "err", err)
 		os.Exit(1)
