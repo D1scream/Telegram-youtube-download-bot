@@ -117,43 +117,48 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 	}
 	defer file.Close()
 
+	var sentID int
 	if info, err := file.Stat(); err == nil && info.Size() > telegramMaxUploadBytes {
-		s.sendFileshareLink(workCtx, job, path, info.Size())
-		return
+		if sentID, path = s.sendFileshareLink(workCtx, job, path, info.Size()); sentID == 0 {
+			return
+		}
+	} else {
+		var sendErr error
+		if sentID, sendErr = job.send(workCtx, job.chatID, 0, filepath.Base(path), file); sendErr != nil {
+			s.logger.ErrorContext(workCtx, "Не удалось отправить файл YouTube", "path", path, "err", sendErr)
+			s.reply(workCtx, job, "Скачано, но не удалось отправить в Telegram")
+			return
+		}
+		s.deleteCommand(workCtx, job)
 	}
-
-	name := filepath.Base(path)
-	sentID, sendErr := job.send(workCtx, job.chatID, 0, name, file)
-	if sendErr != nil {
-		s.logger.ErrorContext(workCtx, "Не удалось отправить файл YouTube", "path", path, "err", sendErr)
-		s.reply(workCtx, job, "Скачано, но не удалось отправить в Telegram")
-		return
-	}
-
-	s.deleteCommand(workCtx, job)
+	// файл ещё здесь (или уже в раздаче) — hook может его прочитать
 	if job.after != nil {
 		job.after(workCtx, job.chatID, sentID, path)
 	}
 }
 
-func (s *Service) sendFileshareLink(ctx context.Context, job downloadJob, path string, size int64) {
+// sendFileshareLink выкладывает файл на раздачу и отправляет ссылку.
+// Возвращает сообщение со ссылкой (0 при ошибке) и новый путь файла.
+func (s *Service) sendFileshareLink(ctx context.Context, job downloadJob, path string, size int64) (int, string) {
 	sizeMB := float64(size) / (1024 * 1024)
 	if s.fileshare == nil {
 		s.reply(ctx, job, fmt.Sprintf("Файл слишком большой для Telegram (%.1f MB), а раздача файлов не настроена", sizeMB))
-		return
+		return 0, path
 	}
-	link, err := s.fileshare.publish(path)
+	link, shared, err := s.fileshare.publish(path)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "Не удалось выложить файл на раздачу", "path", path, "err", err)
 		s.reply(ctx, job, fmt.Sprintf("Файл слишком большой для Telegram (%.1f MB), а выложить его на раздачу не удалось", sizeMB))
-		return
+		return 0, path
 	}
 
-	if _, err := s.messenger.ReplyToChat(ctx, job.chatID, 0, link); err != nil {
+	sentID, err := s.messenger.ReplyToChat(ctx, job.chatID, 0, link)
+	if err != nil {
 		s.logger.ErrorContext(ctx, "Не удалось отправить ссылку YouTube", "link", link, "err", err)
-		return
+		return 0, shared
 	}
 	s.deleteCommand(ctx, job)
+	return sentID, shared
 }
 
 func (s *Service) reply(ctx context.Context, job downloadJob, text string) {
