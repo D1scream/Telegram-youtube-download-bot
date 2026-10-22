@@ -45,6 +45,8 @@ func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 		h.handleYtm(ctx, msg, args)
 	case isCommand(cmd, "ytv"):
 		h.handleYtv(ctx, msg, args)
+	case isCommand(cmd, "bpm"):
+		h.handleBPM(ctx, msg, args)
 	case isCommand(cmd, "check"):
 		h.handleCheck(ctx, msg, args)
 	case isCommand(cmd, "start"):
@@ -63,6 +65,8 @@ func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 		h.imposter.handleTopic(ctx, msg, args)
 	case isCommand(cmd, "word"):
 		h.imposter.handleWord(ctx, msg, args)
+	case msg.Chat.Type == models.ChatTypePrivate && findAudio(msg) != nil:
+		h.handleBPM(ctx, msg, "") // в личке музыка без команды — сразу гифка
 	default:
 		h.handlePassiveCheck(ctx, msg, messageCommandLine(msg))
 	}
@@ -78,6 +82,7 @@ func messageCommandLine(msg *models.Message) string {
 const helpMessage = `Команды
 /ytm <URL> [1:20-2:45] - аудио с YouTube, можно отрезок
 /ytv <URL> [1:20-2:45] - видео с YouTube, можно отрезок
+/bpm - ответом на музыку: гифка в такт (в личке достаточно прислать трек); /bpm <BPM> [битов] - под заданный BPM
 /check <текст> - проверка текста
 /imposter - игра "Импостер". Команды /imposter_settings, /imposter_stop, /word`
 

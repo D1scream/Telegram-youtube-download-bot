@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -124,6 +125,19 @@ func (t *Bot) ReplyAudio(ctx context.Context, chatID int64, messageID int, filen
 	})
 	if err != nil {
 		return 0, fmt.Errorf("отправить аудио Telegram: %w", err)
+	}
+	t.record(msg)
+	return msg.ID, nil
+}
+
+func (t *Bot) ReplyAnimation(ctx context.Context, chatID int64, messageID int, filename string, data io.Reader) (int, error) {
+	msg, err := t.client.SendAnimation(ctx, &bot.SendAnimationParams{
+		ChatID:          chatID,
+		Animation:       &models.InputFileUpload{Filename: filename, Data: data},
+		ReplyParameters: replyTo(messageID),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("отправить анимацию Telegram: %w", err)
 	}
 	t.record(msg)
 	return msg.ID, nil
