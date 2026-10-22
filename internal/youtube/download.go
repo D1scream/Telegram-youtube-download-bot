@@ -28,6 +28,10 @@ type Messenger interface {
 	DeleteMessage(ctx context.Context, chatID int64, messageID int) error
 }
 
+// AudioHook вызывается после отправки скачанного аудио: messageID — сообщение
+// с аудио, path — его файл (удаляется после возврата из hook).
+type AudioHook func(ctx context.Context, chatID int64, messageID int, path string)
+
 type fileDownloader func(ctx context.Context, pageURL string) (downloadResult, error)
 
 type fileSender func(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error)
@@ -38,6 +42,7 @@ type downloadJob struct {
 	rawURL    string
 	download  fileDownloader
 	send      fileSender
+	after     AudioHook
 }
 
 type Service struct {
@@ -65,13 +70,14 @@ func New(cfg Config, messenger Messenger, logger *slog.Logger) (*Service, error)
 	return s, nil
 }
 
-func (s *Service) DownloadMusic(ctx context.Context, chatID int64, messageID int, rawURL string) {
+func (s *Service) DownloadMusic(ctx context.Context, chatID int64, messageID int, rawURL string, after AudioHook) {
 	go s.runDownload(ctx, downloadJob{
 		chatID:    chatID,
 		messageID: messageID,
 		rawURL:    rawURL,
 		download:  s.ytdlp.downloadAudio,
 		send:      s.messenger.ReplyAudio,
+		after:     after,
 	})
 }
 
@@ -117,13 +123,17 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 	}
 
 	name := filepath.Base(path)
-	if _, sendErr := job.send(workCtx, job.chatID, 0, name, file); sendErr != nil {
+	sentID, sendErr := job.send(workCtx, job.chatID, 0, name, file)
+	if sendErr != nil {
 		s.logger.ErrorContext(workCtx, "Не удалось отправить файл YouTube", "path", path, "err", sendErr)
 		s.reply(workCtx, job, "Скачано, но не удалось отправить в Telegram")
 		return
 	}
 
 	s.deleteCommand(workCtx, job)
+	if job.after != nil {
+		job.after(workCtx, job.chatID, sentID, path)
+	}
 }
 
 func (s *Service) sendFileshareLink(ctx context.Context, job downloadJob, path string, size int64) {

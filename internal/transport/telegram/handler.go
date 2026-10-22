@@ -88,7 +88,7 @@ func messageCommandLine(msg *models.Message) string {
 const helpMessage = `Команды
 /ytm <URL> [1:20-2:45] - аудио с YouTube, можно отрезок
 /ytv <URL> [1:20-2:45] - видео с YouTube, можно отрезок
-/bpm - ответом на музыку: гифка в такт (в личке достаточно прислать трек); /bpm <BPM> [битов] - под заданный BPM
+/bpm - ответом на музыку: гифка в такт (в личке достаточно прислать трек); /bpm <BPM> - под заданный BPM
 /agif [имя] - следующая гифка (или выбранная) под BPM предыдущей песни; /agif_list - список гифок
 /check <текст> - проверка текста
 /imposter - игра "Импостер". Команды /imposter_settings, /imposter_stop, /word`
@@ -178,7 +178,7 @@ func (h *Handler) reply(ctx context.Context, msg *models.Message, text string) {
 }
 
 func (h *Handler) handleYtm(ctx context.Context, msg *models.Message, url string) {
-	h.youtube.DownloadMusic(ctx, msg.Chat.ID, msg.ID, url)
+	h.youtube.DownloadMusic(ctx, msg.Chat.ID, msg.ID, url, h.ytmGIF)
 }
 
 func (h *Handler) handleYtv(ctx context.Context, msg *models.Message, url string) {
