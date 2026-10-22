@@ -45,16 +45,18 @@ func startFileshare(dir, baseURL string, logger *slog.Logger) (*fileshare, error
 }
 
 // publish переносит файл в папку раздачи и возвращает прямую ссылку на него.
-func (f *fileshare) publish(path string) (string, error) {
+// publish переносит файл в раздачу; возвращает ссылку и новый путь файла.
+func (f *fileshare) publish(path string) (string, string, error) {
 	token := rand.Text()
 	if err := os.Mkdir(filepath.Join(f.dir, token), 0o755); err != nil {
-		return "", err
+		return "", "", err
 	}
 	name := linkName(filepath.Base(path))
-	if err := os.Rename(path, filepath.Join(f.dir, token, name)); err != nil {
-		return "", err
+	dst := filepath.Join(f.dir, token, name)
+	if err := os.Rename(path, dst); err != nil {
+		return "", "", err
 	}
-	return f.baseURL + "/" + token + "/" + name, nil
+	return f.baseURL + "/" + token + "/" + name, dst, nil
 }
 
 // linkName делает имя файла читаемым в ссылке: пробелы -> _, остальные символы кроме букв, цифр, . и - убираются.
