@@ -51,7 +51,7 @@ func OpenGIFQueue(dir, path string) (*GIFQueue, error) {
 	return q, nil
 }
 
-// list возвращает файлы гифок каталога по имени.
+// list возвращает файлы гифок (и клипов .mp4) каталога по имени.
 func (q *GIFQueue) list() ([]string, error) {
 	entries, err := os.ReadDir(q.dir)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -59,7 +59,8 @@ func (q *GIFQueue) list() ([]string, error) {
 	}
 	var names []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), ".gif") {
+		// .mp4 — клип, который в GIF не влезает без потери качества (SyncVideo)
+		if ext := strings.ToLower(filepath.Ext(e.Name())); !e.IsDir() && (ext == ".gif" || ext == ".mp4") {
 			names = append(names, e.Name())
 		}
 	}

@@ -36,8 +36,8 @@ func DecodeAudio(ctx context.Context, path string) ([]int16, int, error) {
 // DetectBPM — BPM из звука (как detect_bpm_from_file): RMS-огибающая за
 // 10 мс -> атаки -> автокорреляция, поиск 60–180 BPM шагом 0.05 -> уточнение
 // ±0.75 BPM по средней силе атак на сетке битов. На 20 треках с тегом BPM:
-// 17 точно, ещё 2 — с ошибкой в кратность темпа. Результат округляется
-// до целого: студийная музыка почти всегда в целом BPM.
+// 17 точно, ещё 2 — с ошибкой в кратность темпа. Результат — с шагом 0.05,
+// почти целое округляется до целого (студийная музыка обычно в целом BPM).
 func DetectBPM(samples []int16, rate int) (float64, error) {
 	frame := max(1, rate/100)
 	n := len(samples) / frame
@@ -122,7 +122,11 @@ func DetectBPM(samples []int16, rate int) (float64, error) {
 			}
 		}
 	}
-	return roundHalfEven(ref), nil
+	// шаг уточнения 0.05; почти целое — целое (студийная музыка обычно в целом BPM)
+	if r := math.Round(ref); math.Abs(ref-r) < 0.075 {
+		return r, nil
+	}
+	return math.Round(ref*20) / 20, nil
 }
 
 // pySum — сумма с компенсацией Ноймайера, как sum() в Python 3.12+;
