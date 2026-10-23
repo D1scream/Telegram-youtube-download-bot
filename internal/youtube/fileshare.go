@@ -44,8 +44,7 @@ func startFileshare(dir, baseURL string, logger *slog.Logger) (*fileshare, error
 	return f, nil
 }
 
-// publish переносит файл в папку раздачи и возвращает прямую ссылку на него.
-// publish переносит файл в раздачу; возвращает ссылку и новый путь файла.
+// publish переносит файл в раздачу; возвращает ссылку и новый путь.
 func (f *fileshare) publish(path string) (string, string, error) {
 	token := rand.Text()
 	if err := os.Mkdir(filepath.Join(f.dir, token), 0o755); err != nil {

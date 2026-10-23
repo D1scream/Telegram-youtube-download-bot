@@ -49,7 +49,7 @@ func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 		h.handleYtv(ctx, msg, args)
 	case isCommand(cmd, "bpm"):
 		h.handleBPM(ctx, msg, args)
-	case isCommand(cmd, "agif_list"), isCommand(cmd, "agif-list"):
+	case isCommand(cmd, "agif_list"):
 		h.handleAGIFList(ctx, msg)
 	case isCommand(cmd, "agif"):
 		h.handleAGIF(ctx, msg, args)

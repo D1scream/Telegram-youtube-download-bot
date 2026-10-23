@@ -3,6 +3,7 @@ package youtube
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -23,18 +24,17 @@ type Config struct {
 
 type Messenger interface {
 	ReplyToChat(ctx context.Context, chatID int64, messageID int, text string) (int, error)
-	ReplyAudio(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error)
-	ReplyVideo(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error)
+	ReplyAudio(ctx context.Context, chatID int64, messageID int, filename string, data io.Reader) (int, error)
+	ReplyVideo(ctx context.Context, chatID int64, messageID int, filename string, data io.Reader) (int, error)
 	DeleteMessage(ctx context.Context, chatID int64, messageID int) error
 }
 
-// AudioHook вызывается после отправки скачанного аудио: messageID — сообщение
-// с аудио, path — его файл (удаляется после возврата из hook).
+// AudioHook вызывается после отправки аудио; path удаляется после возврата.
 type AudioHook func(ctx context.Context, chatID int64, messageID int, path string)
 
 type fileDownloader func(ctx context.Context, pageURL string) (downloadResult, error)
 
-type fileSender func(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error)
+type fileSender func(ctx context.Context, chatID int64, messageID int, filename string, data io.Reader) (int, error)
 
 type downloadJob struct {
 	chatID    int64
@@ -131,14 +131,12 @@ func (s *Service) runDownload(ctx context.Context, job downloadJob) {
 		}
 		s.deleteCommand(workCtx, job)
 	}
-	// файл ещё здесь (или уже в раздаче) — hook может его прочитать
 	if job.after != nil {
 		job.after(workCtx, job.chatID, sentID, path)
 	}
 }
 
 // sendFileshareLink выкладывает файл на раздачу и отправляет ссылку.
-// Возвращает сообщение со ссылкой (0 при ошибке) и новый путь файла.
 func (s *Service) sendFileshareLink(ctx context.Context, job downloadJob, path string, size int64) (int, string) {
 	sizeMB := float64(size) / (1024 * 1024)
 	if s.fileshare == nil {

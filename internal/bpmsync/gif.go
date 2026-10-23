@@ -2,16 +2,13 @@ package bpmsync
 
 import "fmt"
 
-// Задержка кадра GIF записана в Graphic Control Extension в сотых долях
-// секунды; паузы 0 и 10 мс браузеры крутят как 100 мс.
+// Задержка GIF — в сотых секунды; 0 и 10 мс браузеры крутят как 100 мс.
 const (
 	gifUnitMs   = 10
 	gifMinDelay = 2 // в единицах gifUnitMs
 )
 
-// gifDelayOffsets — смещения поля задержки GCE для каждого кадра (-1, если у
-// кадра нет GCE). Данные пикселей не распаковываются: блоки только
-// пропускаются.
+// gifDelayOffsets — смещения поля задержки GCE каждого кадра (-1 — без GCE).
 func gifDelayOffsets(src []byte) ([]int, error) {
 	if len(src) < 13 {
 		return nil, fmt.Errorf("GIF слишком короткий")
@@ -24,7 +21,7 @@ func gifDelayOffsets(src []byte) ([]int, error) {
 		p += 3 << (src[10]&0x07 + 1) // глобальная палитра
 	}
 	var frames []int
-	delay := -1 // GCE, ждущий своего кадра
+	delay := -1
 	for p < len(src) {
 		switch src[p] {
 		case 0x3B:
@@ -38,7 +35,7 @@ func gifDelayOffsets(src []byte) ([]int, error) {
 				if p+6 >= len(src) || src[p+2] < 4 {
 					return nil, fmt.Errorf("некорректный GCE у кадра %d", len(frames)+1)
 				}
-				delay = p + 4 // повторный GCE перекрывает предыдущий, как в Pillow
+				delay = p + 4 // повторный GCE перекрывает предыдущий
 			}
 			var err error
 			if p, err = skipSubBlocks(src, p+2); err != nil {
@@ -66,7 +63,7 @@ func gifDelayOffsets(src []byte) ([]int, error) {
 			return nil, fmt.Errorf("неизвестный блок 0x%02X на смещении %d", src[p], p)
 		}
 	}
-	// без 0x3B браузеры и Pillow файл всё равно показывают
+	// 0x3B в конце не обязателен
 	if len(frames) == 0 {
 		return nil, fmt.Errorf("в GIF нет кадров")
 	}
@@ -87,8 +84,7 @@ func skipSubBlocks(src []byte, p int) (int, error) {
 	}
 }
 
-// Delays возвращает задержки кадров (мс) так, как их видит браузер:
-// кадр без GCE и задержки 0/10 мс крутятся как 100 мс.
+// Delays — задержки кадров в мс, как их показывает браузер.
 func Delays(src []byte) ([]int, error) {
 	offs, err := gifDelayOffsets(src)
 	if err != nil {

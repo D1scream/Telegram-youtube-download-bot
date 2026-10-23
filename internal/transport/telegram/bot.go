@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -97,11 +96,7 @@ func (t *Bot) ReplyToChat(ctx context.Context, chatID int64, messageID int, mess
 	})
 }
 
-func (t *Bot) ReplyVideo(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error) {
-	return t.ReplyVideoData(ctx, chatID, messageID, filename, file)
-}
-
-func (t *Bot) ReplyVideoData(ctx context.Context, chatID int64, messageID int, filename string, data io.Reader) (int, error) {
+func (t *Bot) ReplyVideo(ctx context.Context, chatID int64, messageID int, filename string, data io.Reader) (int, error) {
 	msg, err := t.client.SendVideo(ctx, &bot.SendVideoParams{
 		ChatID: chatID,
 		Video: &models.InputFileUpload{
@@ -118,12 +113,12 @@ func (t *Bot) ReplyVideoData(ctx context.Context, chatID int64, messageID int, f
 	return msg.ID, nil
 }
 
-func (t *Bot) ReplyAudio(ctx context.Context, chatID int64, messageID int, filename string, file *os.File) (int, error) {
+func (t *Bot) ReplyAudio(ctx context.Context, chatID int64, messageID int, filename string, data io.Reader) (int, error) {
 	msg, err := t.client.SendAudio(ctx, &bot.SendAudioParams{
 		ChatID: chatID,
 		Audio: &models.InputFileUpload{
 			Filename: filename,
-			Data:     file,
+			Data:     data,
 		},
 		ReplyParameters: replyTo(messageID),
 	})

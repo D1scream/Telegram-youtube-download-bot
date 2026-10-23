@@ -10,18 +10,15 @@ import (
 	"strings"
 )
 
-// VideoResult — подогнанный ролик и сведения о подгонке.
+// VideoResult — подогнанный ролик.
 type VideoResult struct {
 	Output   []byte
 	Speed    float64
-	LengthMs float64 // длительность ролика после подгонки, мс
+	LengthMs float64 // мс
 }
 
-// SyncVideo подгоняет ролик (MP4, звук отбрасывается) под bpm и отдаёт его
-// целиком, один раз — для клипов, которые в GIF не влезают. С baseBPM
-// скорость — bpm/baseBPM (удвоение/деление пополам — в коридор скорости),
-// без него ролик считается циклом на целое число битов, как гифка. Кадры не
-// трогаются: метки времени ffmpeg считает от номера кадра.
+// SyncVideo подгоняет ролик под bpm, без звука. С baseBPM скорость —
+// bpm/baseBPM, приведённая в коридор удвоением или делением пополам.
 func SyncVideo(ctx context.Context, path string, bpm, baseBPM float64) (VideoResult, error) {
 	if bpm < MinBPM || bpm > MaxBPM {
 		return VideoResult{}, fmt.Errorf("BPM %.1f неправдоподобен (допустимо %d–%d)", bpm, MinBPM, MaxBPM)
@@ -42,7 +39,7 @@ func SyncVideo(ctx context.Context, path string, bpm, baseBPM float64) (VideoRes
 		}
 	} else {
 		beatMs := 60000 / bpm
-		res.Speed = cycleMs / (float64(ChooseBeats(cycleMs, beatMs, SpeedMin, SpeedMax)) * beatMs)
+		res.Speed = cycleMs / (float64(chooseBeats(cycleMs, beatMs)) * beatMs)
 	}
 	res.LengthMs = cycleMs / res.Speed
 	res.Output, err = retimeVideo(ctx, path, num, den, res.Speed)
@@ -67,8 +64,7 @@ func probeVideo(ctx context.Context, path string) (num, den, frames int, err err
 	return num, den, frames, nil
 }
 
-// retimeVideo перекодирует ролик со скоростью speed: метка кадра N —
-// N/(fps·speed), шкала 1 мс, без B-кадров (как framesToMP4).
+// retimeVideo перекодирует ролик со скоростью speed.
 func retimeVideo(ctx context.Context, path string, num, den int, speed float64) ([]byte, error) {
 	dir, err := os.MkdirTemp("", "video-")
 	if err != nil {
