@@ -2,18 +2,14 @@ package bpmsync
 
 import "math"
 
-// maxBeats — предел числа битов на цикл (длиннее ~20 с не бывает).
+// maxBeats — предел битов на цикл.
 const maxBeats = 64
 
-// ChooseBeats — целое число битов на цикл, при котором скорость ближе всего
-// к ×1, внутри коридора speedMin..speedMax.
-func ChooseBeats(cycleMs, beatMs, speedMin, speedMax float64) int {
-	if beatMs <= 0 {
-		return 1
-	}
+// chooseBeats — число битов на цикл со скоростью ближе всего к ×1.
+func chooseBeats(cycleMs, beatMs float64) int {
 	natural := cycleMs / beatMs
-	lo := max(1, int(math.Ceil(natural/speedMax-1e-9)))
-	hi := max(lo, min(maxBeats, int(math.Floor(natural/speedMin+1e-9))))
+	lo := max(1, int(math.Ceil(natural/SpeedMax-1e-9)))
+	hi := max(lo, min(maxBeats, int(math.Floor(natural/SpeedMin+1e-9))))
 	best := lo
 	for b := lo + 1; b <= hi; b++ {
 		if math.Abs(math.Log(natural/float64(b))) < math.Abs(math.Log(natural/float64(best))) {
@@ -23,14 +19,13 @@ func ChooseBeats(cycleMs, beatMs, speedMin, speedMax float64) int {
 	return best
 }
 
-// FitBeatsNumber удваивает/делит число битов, пока скорость natural/beats
-// не попадёт в коридор. Делится только чётное: движения рисунка остаются на
-// битах (через бит или по два на бит), нечётное пополам их бы сдвинуло.
-func FitBeatsNumber(natural float64, beats int, speedMin, speedMax float64) int {
-	for natural/float64(beats) > speedMax {
+// fitBeats удваивает или делит число битов, пока скорость не попадёт в
+// коридор. Делится только чётное, чтобы движения оставались на битах.
+func fitBeats(natural float64, beats int) int {
+	for natural/float64(beats) > SpeedMax {
 		beats *= 2
 	}
-	for beats%2 == 0 && natural/float64(beats) < speedMin {
+	for beats%2 == 0 && natural/float64(beats) < SpeedMin {
 		beats /= 2
 	}
 	return beats
@@ -40,17 +35,15 @@ func FitBeatsNumber(natural float64, beats int, speedMin, speedMax float64) int 
 type Fit struct {
 	BeatMs   float64 // длительность бита, мс
 	CycleMs  float64 // исходный цикл, мс
-	Frames   int     // кадров в цикле
 	Beats    int     // битов на цикл после подгонки
-	Adjusted bool    // заданные биты перестроены, чтобы попасть в коридор
-	LoopMs   float64 // цикл после подгонки (Beats битов), мс
+	Adjusted bool    // биты удвоены или поделены
+	LoopMs   float64 // цикл после подгонки, мс
 	Speed    float64 // множитель скорости
-	Order    []int   // кадры исходника одного прохода
+	Order    []int   // кадры одного прохода
 }
 
-// FitGIF подбирает число битов на цикл (beats <= 0 — авто) в коридоре
-// speedMin..speedMax. Проход — цикл, а при хвосте-неповторе — весь файл.
-func FitGIF(delays []int, cycle int, bpm float64, speedMin, speedMax float64, beats int) Fit {
+// fitGIF подбирает число битов на цикл: из метки темпа или ближе к ×1.
+func fitGIF(delays []int, cycle int, bpm float64, beats int) Fit {
 	beatMs := 60000 / bpm
 	cycleMs := 0.0
 	for _, d := range delays[:cycle] {
@@ -58,11 +51,11 @@ func FitGIF(delays []int, cycle int, bpm float64, speedMin, speedMax float64, be
 	}
 	adjusted := false
 	if beats > 0 {
-		fitted := FitBeatsNumber(cycleMs/beatMs, beats, speedMin, speedMax)
+		fitted := fitBeats(cycleMs/beatMs, beats)
 		adjusted = fitted != beats
 		beats = fitted
 	} else {
-		beats = ChooseBeats(cycleMs, beatMs, speedMin, speedMax)
+		beats = chooseBeats(cycleMs, beatMs)
 	}
 	n := cycle
 	if len(delays)%cycle != 0 {
@@ -76,7 +69,6 @@ func FitGIF(delays []int, cycle int, bpm float64, speedMin, speedMax float64, be
 	return Fit{
 		BeatMs:   beatMs,
 		CycleMs:  cycleMs,
-		Frames:   cycle,
 		Beats:    beats,
 		Adjusted: adjusted,
 		LoopMs:   loopMs,

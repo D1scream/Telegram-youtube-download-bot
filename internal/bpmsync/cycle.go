@@ -10,10 +10,8 @@ import (
 	"slices"
 )
 
-// DetectCycle ищет минимальный период p, с которым кадры повторяются (>= 2
-// раз), длину хвоста после последнего полного цикла и то, повторяет ли хвост
-// начало цикла (такой хвост безопасно обрезать). Кадры сравниваются после
-// склейки с учётом disposal — как их видит зритель (аналог detect_cycle).
+// DetectCycle ищет минимальный период повтора кадров, длину хвоста после
+// последнего цикла и повторяет ли хвост начало цикла.
 func DetectCycle(src []byte) (period, tail int, tailDups bool, err error) {
 	var hs [][md5.Size]byte
 	err = composeFrames(src, func(_ int, canvas *image.RGBA) error {
@@ -33,8 +31,7 @@ func DetectCycle(src []byte) (period, tail int, tailDups bool, err error) {
 	return n, 0, false, nil
 }
 
-// composeFrames склеивает кадры GIF с учётом disposal — как их видит
-// зритель — и отдаёт каждый в fn (холст переиспользуется между вызовами).
+// composeFrames отдаёт в fn кадры, склеенные с учётом disposal (холст общий).
 func composeFrames(src []byte, fn func(i int, canvas *image.RGBA) error) error {
 	g, err := gif.DecodeAll(bytes.NewReader(src))
 	if err != nil {

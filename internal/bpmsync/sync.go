@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// Коридор скорости: быстрее/медленнее гифка смотрится неестественно.
+// Допустимые скорость и BPM.
 const (
 	SpeedMin = 0.7
 	SpeedMax = 1.5
@@ -21,83 +21,63 @@ const (
 	MaxBPM   = 400
 )
 
-// GIFResult — подгонка гифки под BPM (сам MP4 делает SyncMP4).
-type GIFResult struct {
-	Fit
-	TotalFrames int // кадров в исходном файле
-	TrimmedTail int // отброшено кадров хвоста-повтора
-}
-
-// SyncGIF подгоняет цикл GIF под bpm. beats <= 0 — авто-выбор битов.
-// baseBPM > 0 — темп, под который нарисована гифка: тогда битов на цикл
-// столько, сколько их в исходном цикле при этом темпе (в коридор скорости
-// их возвращает только удвоение/деление пополам — ритм рисунка сохраняется).
-func SyncGIF(src []byte, bpm float64, beats int, baseBPM float64) (GIFResult, error) {
+// SyncGIF подгоняет цикл гифки под bpm. При baseBPM > 0 число битов на цикл
+// берётся из него и только удваивается или делится пополам.
+func SyncGIF(src []byte, bpm, baseBPM float64) (Fit, error) {
 	if bpm < MinBPM || bpm > MaxBPM {
-		return GIFResult{}, fmt.Errorf("BPM %.1f неправдоподобен (допустимо %d–%d)", bpm, MinBPM, MaxBPM)
+		return Fit{}, fmt.Errorf("BPM %.1f неправдоподобен (допустимо %d–%d)", bpm, MinBPM, MaxBPM)
 	}
 	delays, err := Delays(src)
 	if err != nil {
-		return GIFResult{}, err
+		return Fit{}, err
 	}
 	if len(delays) < 2 {
-		return GIFResult{}, fmt.Errorf("в GIF один кадр — нечего ускорять")
+		return Fit{}, fmt.Errorf("в GIF один кадр — нечего ускорять")
 	}
-	res := GIFResult{TotalFrames: len(delays)}
 	cycle := len(delays)
-	// не декодируется стандартной библиотекой — цикл = весь файл
 	if p, tail, dups, err := DetectCycle(src); err == nil {
 		cycle = p
 		if dups {
-			res.TrimmedTail = tail
 			delays = delays[:len(delays)-tail]
 		}
 	}
 	frames := len(delays)
-	if beats <= 0 && baseBPM > 0 {
+	beats := 0
+	if baseBPM > 0 {
 		cycleMs := 0
 		for _, d := range delays[:cycle] {
 			cycleMs += d
 		}
 		n := float64(cycleMs) * baseBPM / 60000
-		// рисунок на полбита (цикл 3.5 бита): два цикла подряд — 7 целых битов
+		// цикл на полбита — играем два цикла подряд
 		if frames == cycle && math.Abs(n-math.Round(n)) > 0.25 {
 			delays = append(delays, delays...)
 			cycle, n = 2*cycle, 2*n
 		}
 		beats = max(1, int(math.Round(n)))
 	}
-	res.Fit = FitGIF(delays, cycle, bpm, SpeedMin, SpeedMax, beats)
+	res := fitGIF(delays, cycle, bpm, beats)
 	for i := range res.Order {
-		res.Order[i] %= frames // второй цикл — те же кадры исходника
+		res.Order[i] %= frames
 	}
 	return res, nil
 }
 
-// Длина MP4 из повторов цикла: плеер Telegram на каждом повторе файла
-// перематывает его в начало и теряет на этом миллисекунды — при цикле 500 мс
-// это дрейф в секунды за минуту. Длинный файл перематывается редко.
+// Цикл повторяется до минуты: на каждой перемотке файла Telegram теряет время.
 const (
-	mp4TargetMs = 60000           // столько повторов цикла, чтобы набралась минута
-	mp4MaxBytes = 5 * 1024 * 1024 // но не тяжелее (гифки в чате качаются автоматически)
+	mp4TargetMs = 60000
+	mp4MaxBytes = 5 * 1024 * 1024
 )
 
-// mp4ChunkMs — предел куска, который кодируется один раз: остальная минута —
-// его копии без перекодирования (-c copy), это в разы быстрее.
+// mp4ChunkMs — кусок, который кодируется один раз; остальное — его копии.
 const mp4ChunkMs = 10000
 
-// mp4Scale — не больше 480 px по длинной стороне, стороны чётные (yuv420p).
-// В чате гифка крупнее не показывается, а плеер Telegram Desktop отстаёт тем
-// сильнее, чем дольше декодируется кадр: по записям экрана tilt 996×912 —
-// +1.8%, tenor 498×498 — ~0.1% (время декодирования копится от кадра к кадру).
+// mp4Scale — до 480 px по длинной стороне, стороны чётные.
 const mp4Scale = "scale=w='trunc(min(iw,480*iw/max(iw,ih))/2)*2':h='trunc(min(ih,480*ih/max(iw,ih))/2)*2':flags=lanczos"
 
-// SyncMP4 делает из подогнанной гифки MP4 (H.264) — так, как приложение
-// Telegram перед отправкой: Telegram показывает его как GIF. Цикл повторяется до mp4TargetMs в пределах mp4MaxBytes.
-// В MP4 нет шага 10 мс формата GIF: длительности кадров — до миллисекунды. Кодируется кусок из нескольких
-// проходов, длина которого почти точно ложится на целые мс, — его копии не
-// копят ошибку. Возвращает MP4 и число проходов.
-func SyncMP4(ctx context.Context, src []byte, res GIFResult) ([]byte, int, error) {
+// SyncMP4 делает из подогнанной гифки MP4 с длительностями кадров до 1 мс.
+// Возвращает MP4 и число проходов.
+func SyncMP4(ctx context.Context, src []byte, res Fit) ([]byte, int, error) {
 	orig, err := Delays(src)
 	if err != nil {
 		return nil, 0, err
@@ -119,7 +99,7 @@ func SyncMP4(ctx context.Context, src []byte, res GIFResult) ([]byte, int, error
 	if err != nil {
 		return nil, 0, err
 	}
-	k := res.BeatMs * float64(res.Beats) / res.CycleMs // исходный цикл -> beats битов
+	k := res.BeatMs * float64(res.Beats) / res.CycleMs
 	frameMs := make([]float64, len(res.Order))
 	passMs := 0.0
 	lo, hi := orig[res.Order[0]], orig[res.Order[0]]
@@ -128,18 +108,12 @@ func SyncMP4(ctx context.Context, src []byte, res GIFResult) ([]byte, int, error
 		passMs += frameMs[n]
 		lo, hi = min(lo, orig[i]), max(hi, orig[i])
 	}
-	// задержки 30/40 мс — это ровные 33.3 мс исходника, округлённые форматом
-	// GIF до 10 мс: в MP4 ровный шаг возвращается (плавнее, и плеер Telegram
-	// с неровными кадрами отстаёт — запись: urara 30/40 мс −2.4%, tenor ровный — в такт)
+	// 30/40 мс — округлённые форматом GIF ровные 33.3 мс
 	if hi-lo <= gifUnitMs {
 		for n := range frameMs {
 			frameMs[n] = passMs / float64(len(frameMs))
 		}
 	}
-	// проходов в куске: наименьший остаток от целых мс на минуту
-	// кусок — столько проходов, сколько влезает в mp4ChunkMs: в куске H.264
-	// ссылается на прошлые проходы, и повторы почти бесплатны (а копия куска
-	// начинается с ключевого кадра). Округление длины куска до 1 мс — ≤ 3 мс/мин.
 	passes := max(1, int(mp4ChunkMs/passMs))
 	copies := max(1, int(math.Ceil(mp4TargetMs/(float64(passes)*passMs))))
 	chunk, err := encodeFrames(ctx, dir, res.Order, frameMs, passes, 18)
@@ -147,7 +121,7 @@ func SyncMP4(ctx context.Context, src []byte, res GIFResult) ([]byte, int, error
 		return nil, 0, err
 	}
 	if total := float64(chunk * copies); total > mp4MaxBytes {
-		// размер падает примерно вдвое на каждые +6 CRF
+		// +6 CRF — примерно вдвое меньше
 		crf := min(30, 18+int(math.Ceil(6*math.Log2(total*1.1/mp4MaxBytes))))
 		if chunk, err = encodeFrames(ctx, dir, res.Order, frameMs, passes, crf); err != nil {
 			return nil, 0, err
@@ -158,12 +132,9 @@ func SyncMP4(ctx context.Context, src []byte, res GIFResult) ([]byte, int, error
 	return mp4, passes * copies, err
 }
 
-// encodeFrames кодирует passes проходов кадров order (PNG в dir) с
-// длительностями frameMs в dir/chunk.mp4 и возвращает его размер.
-// Конец каждого кадра — накопленное точное время, округлённое до 1 мс. Шкала
-// 1 мс (framerate 1000 у картинок — иначе concat округляет время до 1/25 с),
-// без B-кадров. Длительность последнего кадра concat не передаёт (вышла бы
-// 1 мс) — её ставит фильтр пакетов setts.
+// encodeFrames кодирует passes проходов кадров order в dir/chunk.mp4 и
+// возвращает его размер. framerate 1000 — иначе concat округляет время до
+// 1/25 с; длительность последнего кадра concat теряет, её ставит setts.
 func encodeFrames(ctx context.Context, dir string, order []int, frameMs []float64, passes, crf int) (int, error) {
 	var list strings.Builder
 	entry := func(i, ms int) {

@@ -11,10 +11,8 @@ import (
 	"sync"
 )
 
-// GIFQueue выдаёт гифки из каталога по очереди, у каждого чата своя позиция,
-// и помнит последний BPM чата (для /agif). Каталог читается при каждом
-// запросе (по имени файла), поэтому новые гифки подхватываются без
-// перезапуска. Состояние сохраняется в json-файл.
+// GIFQueue выдаёт гифки каталога по очереди для каждого чата и помнит
+// последний BPM чата. Состояние хранится в json-файле.
 type GIFQueue struct {
 	mu    sync.Mutex
 	dir   string
@@ -23,8 +21,8 @@ type GIFQueue struct {
 }
 
 type gifChat struct {
-	Next int     `json:"next"`          // номер следующей гифки
-	BPM  float64 `json:"bpm,omitempty"` // последний BPM
+	Next int     `json:"next"`
+	BPM  float64 `json:"bpm,omitempty"`
 }
 
 func OpenGIFQueue(dir, path string) (*GIFQueue, error) {
@@ -36,22 +34,13 @@ func OpenGIFQueue(dir, path string) (*GIFQueue, error) {
 	if err != nil {
 		return nil, fmt.Errorf("прочитать очередь гифок: %w", err)
 	}
-	if err := json.Unmarshal(data, &q.chats); err == nil {
-		return q, nil
-	}
-	// прежний формат: только позиция очереди без BPM ({"чат": номер})
-	var old map[int64]int
-	if err := json.Unmarshal(data, &old); err != nil {
+	if err := json.Unmarshal(data, &q.chats); err != nil {
 		return nil, fmt.Errorf("разобрать очередь гифок %s: %w", path, err)
-	}
-	q.chats = make(map[int64]*gifChat, len(old))
-	for id, next := range old {
-		q.chats[id] = &gifChat{Next: next}
 	}
 	return q, nil
 }
 
-// list возвращает файлы гифок (и клипов .mp4) каталога по имени.
+// list — файлы гифок и клипов по имени.
 func (q *GIFQueue) list() ([]string, error) {
 	entries, err := os.ReadDir(q.dir)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -59,7 +48,6 @@ func (q *GIFQueue) list() ([]string, error) {
 	}
 	var names []string
 	for _, e := range entries {
-		// .mp4 — клип, который в GIF не влезает без потери качества (SyncVideo)
 		if ext := strings.ToLower(filepath.Ext(e.Name())); !e.IsDir() && (ext == ".gif" || ext == ".mp4") {
 			names = append(names, e.Name())
 		}
@@ -71,9 +59,8 @@ func (q *GIFQueue) list() ([]string, error) {
 	return names, nil
 }
 
-// next возвращает путь к гифке для чата и запоминает bpm как последний BPM
-// чата. Пустой name — очередная гифка, очередь сдвигается; иначе — гифка по
-// имени (gifTitle, точное или по началу), очередь не трогается.
+// next возвращает гифку для чата и запоминает bpm. Пустой name — очередная,
+// иначе — по имени.
 func (q *GIFQueue) next(chatID int64, bpm float64, name string) (string, error) {
 	names, err := q.list()
 	if err != nil {
@@ -96,8 +83,7 @@ func (q *GIFQueue) next(chatID int64, bpm float64, name string) (string, error) 
 	return filepath.Join(q.dir, file), nil
 }
 
-// findGIF ищет гифку по короткому имени: сначала точное совпадение, потом
-// единственное, начинающееся с name.
+// findGIF ищет гифку по точному имени, затем по единственному совпадению начала.
 func findGIF(names []string, name string) (string, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	var prefix []string
@@ -124,8 +110,7 @@ func findGIF(names []string, name string) (string, error) {
 	}
 }
 
-// gifTitle — короткое имя гифки для списка и выбора: без расширения и метки
-// темпа («skeleton-base-110.gif» -> «skeleton»).
+// gifTitle: «skeleton-base-110.gif» -> «skeleton».
 func gifTitle(file string) string {
 	stem := strings.TrimSuffix(file, filepath.Ext(file))
 	if loc := baseBPMName.FindStringIndex(stem); loc != nil {
@@ -134,7 +119,6 @@ func gifTitle(file string) string {
 	return stem
 }
 
-// lastBPM — BPM последней гифки чата, 0 если её ещё не было.
 func (q *GIFQueue) lastBPM(chatID int64) float64 {
 	q.mu.Lock()
 	defer q.mu.Unlock()

@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	audioRate   = 11025 // частота, в которую ffmpeg переводит аудио
-	detectMinMs = 20000 // короче — BPM по звуку не вычислить
+	audioRate   = 11025
+	detectMinMs = 20000
 	detectLoBPM = 60
 	detectHiBPM = 180
 )
@@ -33,11 +33,8 @@ func DecodeAudio(ctx context.Context, path string) ([]int16, int, error) {
 	return samples, audioRate, nil
 }
 
-// DetectBPM — BPM из звука (как detect_bpm_from_file): RMS-огибающая за
-// 10 мс -> атаки -> автокорреляция, поиск 60–180 BPM шагом 0.05 -> уточнение
-// ±0.75 BPM по средней силе атак на сетке битов. На 20 треках с тегом BPM:
-// 17 точно, ещё 2 — с ошибкой в кратность темпа. Результат — с шагом 0.05,
-// почти целое округляется до целого (студийная музыка обычно в целом BPM).
+// DetectBPM — BPM из звука: атаки, автокорреляция, уточнение по сетке битов.
+// Результат с шагом 0.05, почти целое округляется.
 func DetectBPM(samples []int16, rate int) (float64, error) {
 	frame := max(1, rate/100)
 	n := len(samples) / frame
@@ -52,62 +49,77 @@ func DetectBPM(samples []int16, rate int) (float64, error) {
 		}
 		env[i] = math.Sqrt(float64(sum) / float64(frame))
 	}
-	on := make([]float64, n-1) // атаки: полувыпрямленная разность огибающей
+	on := make([]float64, n-1) // атаки
 	for i := range on {
 		on[i] = max(0, env[i+1]-env[i])
 	}
 	n = len(on)
 	frameMs := float64(frame) * 1000 / float64(rate)
 
-	// автокорреляция атак по целым лагам до 4 периодов самого медленного BPM;
-	// фаза не нужна, поэтому дробный и «плавающий» темп не размазывается
+	// автокорреляция атак до 4 периодов самого медленного BPM
 	maxLag := int(4*60000/detectLoBPM/frameMs) + 2
 	if maxLag >= n {
 		return 0, fmt.Errorf("аудио слишком короткое")
 	}
 	ac := make([]float64, maxLag+1)
 	for lag := range ac {
-		var s pySum
 		for i := 0; i+lag < n; i++ {
-			s.add(on[i] * on[i+lag])
+			ac[lag] += on[i] * on[i+lag]
 		}
-		ac[lag] = s.value()
 	}
 	if ac[0] == 0 {
 		return 0, fmt.Errorf("в записи нет атак — BPM не вычислить")
 	}
-	// грубый поиск шагом 0.05: средняя автокорреляция на кратных периода
-	// в общем окне лагов × априорный темп (лог-нормальный вокруг 120 BPM,
-	// σ = октава, как в librosa) — иначе темп путается вдвое
+	// грубый поиск с априорным темпом около 120 BPM, иначе темп путается вдвое
 	window := float64(maxLag - 1)
 	best, bestS := float64(detectLoBPM), -1.0
 	for j := 0; j <= (detectHiBPM-detectLoBPM)*20; j++ {
 		bpm := detectLoBPM + float64(j)*0.05
 		period := 60000 / bpm / frameMs
-		var s pySum
+		s := 0.0
 		k := 1
 		for ; float64(k)*period <= window; k++ {
 			x := float64(k) * period
 			i := int(x)
 			f := x - float64(i)
-			s.add(ac[i]*(1-f) + ac[i+1]*f)
+			s += ac[i]*(1-f) + ac[i+1]*f
 		}
 		oct := math.Log2(bpm / 120)
-		if v := s.value() / float64(k-1) * math.Exp(-0.5*oct*oct); v > bestS {
+		if v := s / float64(k-1) * math.Exp(-0.5*oct*oct); v > bestS {
 			best, bestS = bpm, v
 		}
 	}
 
-	// уточнение ±0.75 BPM шагом 0.05: средняя сила атак на сетке битов с лучшей фазой
-	ref, refS := best, -1.0
-	for b := best - 0.75; b <= best+0.75; b += 0.05 {
+	ref, refS := gridFit(on, frameMs, best)
+	// априорный темп иногда даёт 2/3 настоящего — проверяем сетку ×1.5
+	c := ref * 1.5
+	for c > detectHiBPM {
+		c /= 2
+	}
+	if b, s := gridFit(on, frameMs, c); s > refS*detectFasterGain {
+		ref = b
+	}
+	if r := math.Round(ref); math.Abs(ref-r) < 0.075 {
+		return r, nil
+	}
+	return math.Round(ref*20) / 20, nil
+}
+
+// detectFasterGain — во сколько сетка ×1.5 может быть хуже найденной.
+const detectFasterGain = 0.9
+
+// gridFit уточняет темп ±0.75 BPM по силе атак на сетке битов.
+func gridFit(on []float64, frameMs, center float64) (bpm, score float64) {
+	n := len(on)
+	bpm, score = center, -1.0
+	for b := center - 0.75; b <= center+0.75; b += 0.05 {
 		p := 60000 / b / frameMs
 		cnt := int(float64(n-1) / p)
 		if cnt <= 10 {
 			continue
 		}
 		for ph := 0; ph < int(p); ph++ {
-			var s pySum
+			s := 0.0
 			for k := 0; k < cnt; k++ {
 				x := float64(ph) + float64(k)*p
 				i := int(x)
@@ -115,37 +127,12 @@ func DetectBPM(samples []int16, rate int) (float64, error) {
 					break
 				}
 				f := x - float64(i)
-				s.add(on[i]*(1-f) + on[i+1]*f)
+				s += on[i]*(1-f) + on[i+1]*f
 			}
-			if mean := s.value() / float64(cnt); mean > refS {
-				ref, refS = b, mean
+			if mean := s / float64(cnt); mean > score {
+				bpm, score = b, mean
 			}
 		}
 	}
-	// шаг уточнения 0.05; почти целое — целое (студийная музыка обычно в целом BPM)
-	if r := math.Round(ref); math.Abs(ref-r) < 0.075 {
-		return r, nil
-	}
-	return math.Round(ref*20) / 20, nil
-}
-
-// pySum — сумма с компенсацией Ноймайера, как sum() в Python 3.12+;
-// без неё близкие кандидаты BPM расходились бы с Python-версией.
-type pySum struct{ s, c float64 }
-
-func (p *pySum) add(x float64) {
-	t := p.s + x
-	if math.Abs(p.s) >= math.Abs(x) {
-		p.c += (p.s - t) + x
-	} else {
-		p.c += (x - t) + p.s
-	}
-	p.s = t
-}
-
-func (p *pySum) value() float64 {
-	if p.c != 0 && !math.IsInf(p.c, 0) && !math.IsNaN(p.c) {
-		return p.s + p.c
-	}
-	return p.s
+	return bpm, score
 }
