@@ -57,9 +57,23 @@ func (h *Handler) handleBPM(ctx context.Context, msg *models.Message, args strin
 }
 
 // handleAGIF: гифка под BPM предыдущей песни чата — следующая из очереди,
-// а «/agif ellen» — выбранная по имени.
+// а «/agif ellen» — выбранная по имени. Подписью к песне или ответом на неё —
+// темп этой песни.
 func (h *Handler) handleAGIF(ctx context.Context, msg *models.Message, name string) {
 	log := h.logger.With("op", "bpm", "chat_id", msg.Chat.ID, "message_id", msg.ID)
+	audio := findAudio(msg)
+	if audio == nil && msg.ReplyToMessage != nil {
+		audio = findAudio(msg.ReplyToMessage)
+	}
+	if audio != nil {
+		if audio.size > telegramMaxGetFile {
+			h.reply(ctx, msg, "Файл больше 20 МБ — бот не может его скачать")
+			return
+		}
+		log.InfoContext(ctx, "BPM: /agif с песней", "file_id", audio.fileID, "size", audio.size, "name", name)
+		h.startBPM(ctx, log, msg, audio, 0, strings.TrimSpace(name))
+		return
+	}
 	bpm := h.gifs.lastBPM(msg.Chat.ID)
 	if bpm == 0 {
 		log.InfoContext(ctx, "BPM: /agif без предыдущей песни")
@@ -160,38 +174,56 @@ func (h *Handler) sendBPMGIF(ctx context.Context, log *slog.Logger, chatID int64
 	if err != nil {
 		return err
 	}
-	src, err := os.ReadFile(gifPath)
-	if err != nil {
+	file := filepath.Base(gifPath)
+	baseBPM := gifBaseBPM(gifPath)
+	stem := fmt.Sprintf("%s-%03dbpm", strings.TrimSuffix(file, filepath.Ext(file)), int(math.Round(bpm)))
+	var data []byte
+	name := stem + ".mp4"
+	send := h.tg.ReplyAnimation
+	start := time.Now()
+	if strings.EqualFold(filepath.Ext(file), ".mp4") {
+		send = h.tg.ReplyVideoData // клип — обычным видео, не гифкой
+		res, err := bpmsync.SyncVideo(ctx, gifPath, bpm, baseBPM)
+		if err != nil {
+			return fmt.Errorf("подогнать ролик %s: %w", file, err)
+		}
+		log.InfoContext(ctx, "BPM: ролик подогнан", "gif", file, "base_bpm", baseBPM, "bpm", bpm,
+			"speed", res.Speed, "length_ms", res.LengthMs, "mp4_bytes", len(res.Output), "took", since(start))
+		data = res.Output
+	} else if data, name, err = syncGIF(ctx, log, gifPath, bpm, baseBPM, stem); err != nil {
 		return err
 	}
-	start := time.Now()
-	baseBPM := gifBaseBPM(gifPath)
-	res, err := bpmsync.SyncGIF(src, bpm, 0, baseBPM)
-	if err != nil {
-		return fmt.Errorf("подогнать гифку %s: %w", filepath.Base(gifPath), err)
-	}
-	log.InfoContext(ctx, "BPM: гифка подогнана", "gif", filepath.Base(gifPath), "base_bpm", baseBPM, "bpm", bpm,
-		"beats", res.Beats, "beats_adjusted", res.Adjusted, "copies", res.Copies, "loop_ms", res.LoopMs,
-		"speed", res.Speed, "drift_ms_per_min", res.DriftPerMin, "took", since(start))
-
-	stem := fmt.Sprintf("%s-%03dbpm", strings.TrimSuffix(filepath.Base(gifPath), filepath.Ext(gifPath)), int(math.Round(bpm)))
-	data, name := res.Output, stem+".gif"
-	start = time.Now()
-	if mp4, loops, err := bpmsync.SyncMP4(ctx, src, res); err != nil {
-		log.WarnContext(ctx, "BPM: не удалось сделать MP4, отправляю GIF — Telegram пережмёт его хуже", "err", err)
-	} else {
-		data, name = mp4, stem+".mp4"
-		log.InfoContext(ctx, "BPM: MP4 готов", "gif_bytes", len(res.Output), "mp4_bytes", len(mp4),
-			"loops", loops, "mp4_ms", res.LoopMs*float64(res.Copies*loops), "took", since(start))
-	}
 
 	start = time.Now()
-	log.InfoContext(ctx, "BPM: отправляю анимацию", "file", name, "bytes", len(data))
-	if _, err := h.tg.ReplyAnimation(ctx, chatID, messageID, name, bytes.NewReader(data)); err != nil {
+	log.InfoContext(ctx, "BPM: отправляю", "file", name, "bytes", len(data))
+	if _, err := send(ctx, chatID, messageID, name, bytes.NewReader(data)); err != nil {
 		return err
 	}
 	log.InfoContext(ctx, "BPM: гифка отправлена", "took", since(start))
 	return nil
+}
+
+// syncGIF подгоняет гифку под bpm и делает из неё MP4.
+func syncGIF(ctx context.Context, log *slog.Logger, gifPath string, bpm, baseBPM float64, stem string) ([]byte, string, error) {
+	src, err := os.ReadFile(gifPath)
+	if err != nil {
+		return nil, "", err
+	}
+	start := time.Now()
+	res, err := bpmsync.SyncGIF(src, bpm, 0, baseBPM)
+	if err != nil {
+		return nil, "", fmt.Errorf("подогнать гифку %s: %w", filepath.Base(gifPath), err)
+	}
+	log.InfoContext(ctx, "BPM: гифка подогнана", "gif", filepath.Base(gifPath), "base_bpm", baseBPM, "bpm", bpm,
+		"beats", res.Beats, "beats_adjusted", res.Adjusted, "loop_ms", res.LoopMs, "speed", res.Speed, "took", since(start))
+
+	start = time.Now()
+	mp4, passes, err := bpmsync.SyncMP4(ctx, src, res)
+	if err != nil {
+		return nil, "", fmt.Errorf("сделать MP4 из %s: %w", filepath.Base(gifPath), err)
+	}
+	log.InfoContext(ctx, "BPM: MP4 готов", "mp4_bytes", len(mp4), "passes", passes, "took", since(start))
+	return mp4, stem + ".mp4", nil
 }
 
 // downloadBPM скачивает аудио из Telegram и определяет его темп.
