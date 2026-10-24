@@ -9,13 +9,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
 
-// Допустимые скорость и BPM.
+// Допустимые скорость и BPM. Коридор ровно ×2: удвоение или деление битов
+// всегда попадает в него. Сдвинут к ускорению — замедленная гифка дёргается.
 const (
-	SpeedMin = 0.7
+	SpeedMin = 0.75
 	SpeedMax = 1.5
 	MinBPM   = 20
 	MaxBPM   = 400
@@ -49,10 +51,11 @@ func SyncGIF(src []byte, bpm, baseBPM float64) (Fit, error) {
 			cycleMs += d
 		}
 		n := float64(cycleMs) * baseBPM / 60000
-		// цикл на полбита — играем два цикла подряд
-		if frames == cycle && math.Abs(n-math.Round(n)) > 0.25 {
-			delays = append(delays, delays...)
-			cycle, n = 2*cycle, 2*n
+		// цикл на полбита или четверть — играем его 2 или 4 раза подряд
+		if frames == cycle {
+			reps := repeatsForBeats(n)
+			delays = slices.Repeat(delays, reps)
+			cycle, n = reps*cycle, float64(reps)*n
 		}
 		beats = max(1, int(math.Round(n)))
 	}
@@ -61,6 +64,24 @@ func SyncGIF(src []byte, bpm, baseBPM float64) (Fit, error) {
 		res.Order[i] %= frames
 	}
 	return res, nil
+}
+
+// repeatsForBeats — сколько раз подряд сыграть цикл из n битов (1, 2 или 4),
+// чтобы битов вышло почти целое: меньшее число повторов, где ошибка не больше
+// 1/8 бита, иначе — где ошибка меньше.
+func repeatsForBeats(n float64) int {
+	best, bestErr := 1, math.Inf(1)
+	for _, r := range []int{1, 2, 4} {
+		x := float64(r) * n
+		e := math.Abs(x - math.Round(x))
+		if e <= 0.125 {
+			return r
+		}
+		if e < bestErr {
+			best, bestErr = r, e
+		}
+	}
+	return best
 }
 
 // Цикл повторяется до минуты: на каждой перемотке файла Telegram теряет время.
@@ -75,9 +96,14 @@ const mp4ChunkMs = 10000
 // mp4Scale — до 480 px по длинной стороне, стороны чётные.
 const mp4Scale = "scale=w='trunc(min(iw,480*iw/max(iw,ih))/2)*2':h='trunc(min(ih,480*ih/max(iw,ih))/2)*2':flags=lanczos"
 
+// DesktopFrameLagMs — сколько Telegram Desktop теряет на каждом кадре
+// (замер на двух гифках с кадрами 48 и 210 мс: отставание 1.6% и 0.36%).
+const DesktopFrameLagMs = 0.75
+
 // SyncMP4 делает из подогнанной гифки MP4 с длительностями кадров до 1 мс.
+// cutMs укорачивает каждый кадр — поправка под Telegram Desktop.
 // Возвращает MP4 и число проходов.
-func SyncMP4(ctx context.Context, src []byte, res Fit) ([]byte, int, error) {
+func SyncMP4(ctx context.Context, src []byte, res Fit, cutMs float64) ([]byte, int, error) {
 	orig, err := Delays(src)
 	if err != nil {
 		return nil, 0, err
@@ -112,6 +138,13 @@ func SyncMP4(ctx context.Context, src []byte, res Fit) ([]byte, int, error) {
 	if hi-lo <= gifUnitMs {
 		for n := range frameMs {
 			frameMs[n] = passMs / float64(len(frameMs))
+		}
+	}
+	if cutMs > 0 {
+		passMs = 0
+		for n := range frameMs {
+			frameMs[n] = max(1, frameMs[n]-cutMs)
+			passMs += frameMs[n]
 		}
 	}
 	passes := max(1, int(mp4ChunkMs/passMs))

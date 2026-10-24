@@ -5,27 +5,25 @@ import "math"
 // maxBeats — предел битов на цикл.
 const maxBeats = 64
 
-// chooseBeats — число битов на цикл со скоростью ближе всего к ×1.
+// chooseBeats — число битов на цикл: степень двойки, чтобы цикл не съезжал
+// относительно такта 4/4, со скоростью в коридоре.
 func chooseBeats(cycleMs, beatMs float64) int {
 	natural := cycleMs / beatMs
-	lo := max(1, int(math.Ceil(natural/SpeedMax-1e-9)))
-	hi := max(lo, min(maxBeats, int(math.Floor(natural/SpeedMin+1e-9))))
-	best := lo
-	for b := lo + 1; b <= hi; b++ {
-		if math.Abs(math.Log(natural/float64(b))) < math.Abs(math.Log(natural/float64(best))) {
-			best = b
-		}
+	beats := 1
+	for beats < maxBeats && natural/float64(beats) > SpeedMax {
+		beats *= 2
 	}
-	return best
+	return beats
 }
 
 // fitBeats удваивает или делит число битов, пока скорость не попадёт в
 // коридор. Делится только чётное, чтобы движения оставались на битах.
+// Делится, только если ускорение ближе к ×1, чем замедление: 0.73 лучше 1.46.
 func fitBeats(natural float64, beats int) int {
 	for natural/float64(beats) > SpeedMax {
 		beats *= 2
 	}
-	for beats%2 == 0 && natural/float64(beats) < SpeedMin {
+	for beats%2 == 0 && natural/float64(beats) < math.Sqrt2/2 {
 		beats /= 2
 	}
 	return beats
