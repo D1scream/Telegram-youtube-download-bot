@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,8 +12,8 @@ import (
 	"sync"
 )
 
-// GIFQueue выдаёт гифки каталога по очереди для каждого чата и помнит
-// последний BPM чата. Состояние хранится в json-файле.
+// GIFQueue выдаёт гифки каталога в случайном порядке без повторов, пока
+// чат не увидит все, и помнит последний BPM чата. Состояние — в json-файле.
 type GIFQueue struct {
 	mu    sync.Mutex
 	dir   string
@@ -21,8 +22,8 @@ type GIFQueue struct {
 }
 
 type gifChat struct {
-	Next int     `json:"next"`
-	BPM  float64 `json:"bpm,omitempty"`
+	Seen []string `json:"seen,omitempty"`
+	BPM  float64  `json:"bpm,omitempty"`
 }
 
 func OpenGIFQueue(dir, path string) (*GIFQueue, error) {
@@ -59,7 +60,7 @@ func (q *GIFQueue) list() ([]string, error) {
 	return names, nil
 }
 
-// next возвращает гифку для чата и запоминает bpm. Пустой name — очередная,
+// next возвращает гифку для чата и запоминает bpm. Пустой name — случайная,
 // иначе — по имени.
 func (q *GIFQueue) next(chatID int64, bpm float64, name string) (string, error) {
 	names, err := q.list()
@@ -71,16 +72,32 @@ func (q *GIFQueue) next(chatID int64, bpm float64, name string) (string, error) 
 	c := q.chat(chatID)
 	var file string
 	if name == "" {
-		i := c.Next % len(names)
-		c.Next, file = i+1, names[i]
+		file = c.pick(names)
 	} else if file, err = findGIF(names, name); err != nil {
 		return "", err
 	}
+	c.shown(file)
 	c.BPM = bpm
 	if err := q.save(); err != nil {
 		return "", err
 	}
 	return filepath.Join(q.dir, file), nil
+}
+
+func (c *gifChat) pick(names []string) string {
+	skip := c.Seen
+	if !slices.ContainsFunc(names, func(n string) bool { return !slices.Contains(skip, n) }) {
+		// новый круг начинается не с недавних: последняя половина прошлого пропускается
+		skip = c.Seen[max(0, len(c.Seen)-len(names)/2):]
+		c.Seen = nil
+	}
+	fresh := slices.DeleteFunc(slices.Clone(names), func(n string) bool { return slices.Contains(skip, n) })
+	return fresh[rand.IntN(len(fresh))]
+}
+
+// shown отмечает гифку показанной в текущем круге.
+func (c *gifChat) shown(file string) {
+	c.Seen = append(slices.DeleteFunc(c.Seen, func(n string) bool { return n == file }), file)
 }
 
 // findGIF ищет гифку по точному имени, затем по единственному совпадению начала.

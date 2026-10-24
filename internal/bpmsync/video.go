@@ -3,6 +3,7 @@ package bpmsync
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,9 +18,10 @@ type VideoResult struct {
 	LengthMs float64 // мс
 }
 
-// SyncVideo подгоняет ролик под bpm, без звука. С baseBPM скорость —
-// bpm/baseBPM, приведённая в коридор удвоением или делением пополам.
-func SyncVideo(ctx context.Context, path string, bpm, baseBPM float64) (VideoResult, error) {
+// SyncVideo подгоняет ролик под bpm, без звука. baseBPM задаёт только число
+// битов в ролике; скорость считается по его длине, так что неточная метка
+// не уводит ритм. cutMs укорачивает каждый кадр — поправка под Telegram Desktop.
+func SyncVideo(ctx context.Context, path string, bpm, baseBPM, cutMs float64) (VideoResult, error) {
 	if bpm < MinBPM || bpm > MaxBPM {
 		return VideoResult{}, fmt.Errorf("BPM %.1f неправдоподобен (допустимо %d–%d)", bpm, MinBPM, MaxBPM)
 	}
@@ -28,18 +30,17 @@ func SyncVideo(ctx context.Context, path string, bpm, baseBPM float64) (VideoRes
 		return VideoResult{}, err
 	}
 	cycleMs := float64(frames) * 1000 * float64(den) / float64(num)
-	var res VideoResult
+	beatMs := 60000 / bpm
+	var beats int
 	if baseBPM > 0 {
-		res.Speed = bpm / baseBPM
-		for res.Speed > SpeedMax {
-			res.Speed /= 2
-		}
-		for res.Speed < SpeedMin {
-			res.Speed *= 2
-		}
+		beats = fitBeats(cycleMs/beatMs, max(1, int(math.Round(cycleMs*baseBPM/60000))))
 	} else {
-		beatMs := 60000 / bpm
-		res.Speed = cycleMs / (float64(chooseBeats(cycleMs, beatMs)) * beatMs)
+		beats = chooseBeats(cycleMs, beatMs)
+	}
+	var res VideoResult
+	res.Speed = cycleMs / (float64(beats) * beatMs)
+	if frameMs := cycleMs / float64(frames) / res.Speed; cutMs > 0 && frameMs > cutMs+1 {
+		res.Speed *= frameMs / (frameMs - cutMs)
 	}
 	res.LengthMs = cycleMs / res.Speed
 	res.Output, err = retimeVideo(ctx, path, num, den, res.Speed)

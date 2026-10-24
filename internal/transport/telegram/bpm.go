@@ -52,12 +52,15 @@ func (h *Handler) handleBPM(ctx context.Context, msg *models.Message, args strin
 	} else {
 		log.InfoContext(ctx, "BPM: задан вручную", "bpm", bpm)
 	}
-	h.startBPM(ctx, log, msg, audio, bpm, "")
+	h.startBPM(ctx, log, msg, audio, bpm, "", true)
 }
 
 // handleAGIF: гифка под BPM песни из сообщения или предыдущей песни чата.
-func (h *Handler) handleAGIF(ctx context.Context, msg *models.Message, name string) {
+// Флаг -c — без поправки под Telegram Desktop.
+func (h *Handler) handleAGIF(ctx context.Context, msg *models.Message, args string) {
 	log := h.logger.With("op", "bpm", "chat_id", msg.Chat.ID, "message_id", msg.ID)
+	name, raw := parseAGIFArgs(args)
+	corrected := !raw
 	audio := findAudio(msg)
 	if audio == nil && msg.ReplyToMessage != nil {
 		audio = findAudio(msg.ReplyToMessage)
@@ -67,8 +70,8 @@ func (h *Handler) handleAGIF(ctx context.Context, msg *models.Message, name stri
 			h.reply(ctx, msg, "Файл больше 20 МБ — бот не может его скачать")
 			return
 		}
-		log.InfoContext(ctx, "BPM: /agif с песней", "file_id", audio.fileID, "size", audio.size, "name", name)
-		h.startBPM(ctx, log, msg, audio, 0, strings.TrimSpace(name))
+		log.InfoContext(ctx, "BPM: /agif с песней", "file_id", audio.fileID, "size", audio.size, "name", name, "corrected", corrected)
+		h.startBPM(ctx, log, msg, audio, 0, name, corrected)
 		return
 	}
 	bpm := h.gifs.lastBPM(msg.Chat.ID)
@@ -77,8 +80,21 @@ func (h *Handler) handleAGIF(ctx context.Context, msg *models.Message, name stri
 		h.reply(ctx, msg, "Сначала пришлите музыку или /bpm <BPM>")
 		return
 	}
-	log.InfoContext(ctx, "BPM: /agif — BPM предыдущей песни", "bpm", bpm, "name", name)
-	h.startBPM(ctx, log, msg, nil, bpm, strings.TrimSpace(name))
+	log.InfoContext(ctx, "BPM: /agif — BPM предыдущей песни", "bpm", bpm, "name", name, "corrected", corrected)
+	h.startBPM(ctx, log, msg, nil, bpm, name, corrected)
+}
+
+// parseAGIFArgs: «[-c] [имя]» в любом порядке.
+func parseAGIFArgs(args string) (name string, raw bool) {
+	var rest []string
+	for _, f := range strings.Fields(args) {
+		if f == "-c" {
+			raw = true
+		} else {
+			rest = append(rest, f)
+		}
+	}
+	return strings.Join(rest, " "), raw
 }
 
 func (h *Handler) handleAGIFList(ctx context.Context, msg *models.Message) {
@@ -95,7 +111,7 @@ func (h *Handler) handleAGIFList(ctx context.Context, msg *models.Message) {
 }
 
 // startBPM подгоняет и отправляет гифку в фоне.
-func (h *Handler) startBPM(ctx context.Context, log *slog.Logger, msg *models.Message, audio *audioFile, bpm float64, gifName string) {
+func (h *Handler) startBPM(ctx context.Context, log *slog.Logger, msg *models.Message, audio *audioFile, bpm float64, gifName string, corrected bool) {
 	go func() {
 		workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bpmTimeout)
 		defer cancel()
@@ -105,7 +121,7 @@ func (h *Handler) startBPM(ctx context.Context, log *slog.Logger, msg *models.Me
 			bpm, err = h.downloadBPM(workCtx, log, audio)
 		}
 		if err == nil {
-			err = h.sendBPMGIF(workCtx, log, msg.Chat.ID, msg.ID, bpm, gifName)
+			err = h.sendBPMGIF(workCtx, log, msg.Chat.ID, msg.ID, bpm, gifName, corrected)
 		}
 		if err != nil {
 			log.ErrorContext(workCtx, "BPM: не удалось", "err", err, "took", since(start))
@@ -154,7 +170,7 @@ func (h *Handler) ytmGIF(ctx context.Context, chatID int64, messageID int, path 
 	start := time.Now()
 	bpm, err := detectBPM(ctx, log, path)
 	if err == nil {
-		err = h.sendBPMGIF(ctx, log, chatID, messageID, bpm, "")
+		err = h.sendBPMGIF(ctx, log, chatID, messageID, bpm, "", true)
 	}
 	if err != nil {
 		log.ErrorContext(ctx, "BPM: не удалось", "err", err, "took", since(start))
@@ -164,7 +180,8 @@ func (h *Handler) ytmGIF(ctx context.Context, chatID int64, messageID int, path 
 }
 
 // sendBPMGIF подгоняет гифку под bpm и отправляет ответом на messageID.
-func (h *Handler) sendBPMGIF(ctx context.Context, log *slog.Logger, chatID int64, messageID int, bpm float64, gifName string) error {
+// corrected — поправка под Telegram Desktop; без неё в имени файла «-c».
+func (h *Handler) sendBPMGIF(ctx context.Context, log *slog.Logger, chatID int64, messageID int, bpm float64, gifName string, corrected bool) error {
 	gifPath, err := h.gifs.next(chatID, bpm, gifName)
 	if err != nil {
 		return err
@@ -172,20 +189,25 @@ func (h *Handler) sendBPMGIF(ctx context.Context, log *slog.Logger, chatID int64
 	file := filepath.Base(gifPath)
 	baseBPM := gifBaseBPM(gifPath)
 	stem := fmt.Sprintf("%s-%03dbpm", strings.TrimSuffix(file, filepath.Ext(file)), int(math.Round(bpm)))
+	cutMs := bpmsync.DesktopFrameLagMs
+	if !corrected {
+		cutMs = 0
+		stem += "-c"
+	}
 	var data []byte
 	name := stem + ".mp4"
 	send := h.tg.ReplyAnimation
 	start := time.Now()
 	if strings.EqualFold(filepath.Ext(file), ".mp4") {
 		send = h.tg.ReplyVideo
-		res, err := bpmsync.SyncVideo(ctx, gifPath, bpm, baseBPM)
+		res, err := bpmsync.SyncVideo(ctx, gifPath, bpm, baseBPM, cutMs)
 		if err != nil {
 			return fmt.Errorf("подогнать ролик %s: %w", file, err)
 		}
 		log.InfoContext(ctx, "BPM: ролик подогнан", "gif", file, "base_bpm", baseBPM, "bpm", bpm,
 			"speed", res.Speed, "length_ms", res.LengthMs, "mp4_bytes", len(res.Output), "took", since(start))
 		data = res.Output
-	} else if data, name, err = syncGIF(ctx, log, gifPath, bpm, baseBPM, stem); err != nil {
+	} else if data, name, err = syncGIF(ctx, log, gifPath, bpm, baseBPM, cutMs, stem); err != nil {
 		return err
 	}
 
@@ -198,7 +220,7 @@ func (h *Handler) sendBPMGIF(ctx context.Context, log *slog.Logger, chatID int64
 	return nil
 }
 
-func syncGIF(ctx context.Context, log *slog.Logger, gifPath string, bpm, baseBPM float64, stem string) ([]byte, string, error) {
+func syncGIF(ctx context.Context, log *slog.Logger, gifPath string, bpm, baseBPM, cutMs float64, stem string) ([]byte, string, error) {
 	src, err := os.ReadFile(gifPath)
 	if err != nil {
 		return nil, "", err
@@ -212,7 +234,7 @@ func syncGIF(ctx context.Context, log *slog.Logger, gifPath string, bpm, baseBPM
 		"beats", res.Beats, "beats_adjusted", res.Adjusted, "loop_ms", res.LoopMs, "speed", res.Speed, "took", since(start))
 
 	start = time.Now()
-	mp4, passes, err := bpmsync.SyncMP4(ctx, src, res)
+	mp4, passes, err := bpmsync.SyncMP4(ctx, src, res, cutMs)
 	if err != nil {
 		return nil, "", fmt.Errorf("сделать MP4 из %s: %w", filepath.Base(gifPath), err)
 	}

@@ -2,10 +2,10 @@
 secrets/youtube_cookies.txt
 secrets/creds.txt
 yt_downloads/
-.cursor/
 souchastnik/model/
 souchastnik/original/
 data/
 deploy.sh
+deploy.ps1
 ssh_pass.txt
 /bot
