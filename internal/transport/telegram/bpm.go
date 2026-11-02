@@ -21,46 +21,23 @@ import (
 const (
 	bpmTimeout         = 2 * time.Minute
 	telegramMaxGetFile = 20 * 1024 * 1024 // предел getFile
-	bpmUsage           = "Пришлите музыку (в группе — ответом /bpm), или /bpm <BPM>"
 )
 
-// handleBPM: BPM из аргумента или из аудио, в ответ — гифка в такт.
-func (h *Handler) handleBPM(ctx context.Context, msg *models.Message, args string) {
-	bpm, err := parseBPMArgs(args)
-	if err != nil {
-		h.reply(ctx, msg, err.Error()+"\n"+bpmUsage)
-		return
-	}
-	log := h.logger.With("op", "bpm", "chat_id", msg.Chat.ID, "message_id", msg.ID)
-	var audio *audioFile
-	if bpm == 0 {
-		if audio = findAudio(msg); audio == nil && msg.ReplyToMessage != nil {
-			audio = findAudio(msg.ReplyToMessage)
-		}
-		if audio == nil {
-			log.InfoContext(ctx, "BPM: нет ни числа, ни аудио — подсказка пользователю")
-			h.reply(ctx, msg, bpmUsage)
-			return
-		}
-		log = log.With("file_id", audio.fileID, "size", audio.size)
-		if audio.size > telegramMaxGetFile {
-			log.WarnContext(ctx, "BPM: файл больше 20 МБ, отказ")
-			h.reply(ctx, msg, "Файл больше 20 МБ — бот не может его скачать")
-			return
-		}
-		log.InfoContext(ctx, "BPM: аудио получено")
-	} else {
-		log.InfoContext(ctx, "BPM: задан вручную", "bpm", bpm)
-	}
-	h.startBPM(ctx, log, msg, audio, bpm, "", true)
-}
-
-// handleAGIF: гифка под BPM песни из сообщения или предыдущей песни чата.
+// handleAGIF: гифка под заданный BPM, иначе под BPM песни из сообщения или предыдущей песни чата.
 // Флаг -c — без поправки под Telegram Desktop.
 func (h *Handler) handleAGIF(ctx context.Context, msg *models.Message, args string) {
 	log := h.logger.With("op", "bpm", "chat_id", msg.Chat.ID, "message_id", msg.ID)
-	name, raw := parseAGIFArgs(args)
+	name, bpm, raw, err := parseAGIFArgs(args)
+	if err != nil {
+		h.reply(ctx, msg, err.Error())
+		return
+	}
 	corrected := !raw
+	if bpm > 0 {
+		log.InfoContext(ctx, "BPM: /agif с заданным BPM", "bpm", bpm, "name", name, "corrected", corrected)
+		h.startBPM(ctx, log, msg, nil, bpm, name, corrected)
+		return
+	}
 	audio := findAudio(msg)
 	if audio == nil && msg.ReplyToMessage != nil {
 		audio = findAudio(msg.ReplyToMessage)
@@ -74,27 +51,35 @@ func (h *Handler) handleAGIF(ctx context.Context, msg *models.Message, args stri
 		h.startBPM(ctx, log, msg, audio, 0, name, corrected)
 		return
 	}
-	bpm := h.gifs.lastBPM(msg.Chat.ID)
+	bpm = h.gifs.lastBPM(msg.Chat.ID)
 	if bpm == 0 {
 		log.InfoContext(ctx, "BPM: /agif без предыдущей песни")
-		h.reply(ctx, msg, "Сначала пришлите музыку или /bpm <BPM>")
+		h.reply(ctx, msg, "Сначала пришлите музыку или укажите BPM: /agif [имя] <BPM>")
 		return
 	}
 	log.InfoContext(ctx, "BPM: /agif — BPM предыдущей песни", "bpm", bpm, "name", name, "corrected", corrected)
 	h.startBPM(ctx, log, msg, nil, bpm, name, corrected)
 }
 
-// parseAGIFArgs: «[-c] [имя]» в любом порядке.
-func parseAGIFArgs(args string) (name string, raw bool) {
+// parseAGIFArgs: «[-c] [имя] [BPM]» в любом порядке; bpm 0 — не задан.
+func parseAGIFArgs(args string) (name string, bpm float64, raw bool, err error) {
 	var rest []string
 	for _, f := range strings.Fields(args) {
 		if f == "-c" {
 			raw = true
-		} else {
-			rest = append(rest, f)
+			continue
 		}
+		v, perr := strconv.ParseFloat(strings.Replace(f, ",", ".", 1), 64)
+		if perr != nil {
+			rest = append(rest, f)
+			continue
+		}
+		if v < bpmsync.MinBPM || v > bpmsync.MaxBPM {
+			return "", 0, false, fmt.Errorf("BPM — число от %d до %d", bpmsync.MinBPM, bpmsync.MaxBPM)
+		}
+		bpm = v
 	}
-	return strings.Join(rest, " "), raw
+	return strings.Join(rest, " "), bpm, raw, nil
 }
 
 func (h *Handler) handleAGIFList(ctx context.Context, msg *models.Message) {
@@ -130,19 +115,6 @@ func (h *Handler) startBPM(ctx context.Context, log *slog.Logger, msg *models.Me
 		}
 		log.InfoContext(workCtx, "BPM: готово", "took", since(start))
 	}()
-}
-
-// parseBPMArgs: 0 — определить по аудио.
-func parseBPMArgs(args string) (float64, error) {
-	args = strings.TrimSpace(args)
-	if args == "" {
-		return 0, nil
-	}
-	bpm, err := strconv.ParseFloat(strings.Replace(args, ",", ".", 1), 64)
-	if err != nil || bpm < bpmsync.MinBPM || bpm > bpmsync.MaxBPM {
-		return 0, fmt.Errorf("BPM — число от %d до %d", bpmsync.MinBPM, bpmsync.MaxBPM)
-	}
-	return bpm, nil
 }
 
 type audioFile struct {

@@ -3,6 +3,8 @@ package telegram
 import (
 	"context"
 	"log/slog"
+	"math/rand/v2"
+	"strconv"
 	"strings"
 
 	"github.com/go-telegram/bot/models"
@@ -47,8 +49,6 @@ func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 		h.handleYtm(ctx, msg, args)
 	case isCommand(cmd, "ytv"):
 		h.handleYtv(ctx, msg, args)
-	case isCommand(cmd, "bpm"):
-		h.handleBPM(ctx, msg, args)
 	case isCommand(cmd, "agif_list"):
 		h.handleAGIFList(ctx, msg)
 	case isCommand(cmd, "agif"):
@@ -57,6 +57,8 @@ func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 		h.handleCheck(ctx, msg, args)
 	case isCommand(cmd, "start"):
 		h.handleStart(ctx, msg)
+	case isCommand(cmd, "roll"):
+		h.handleRoll(ctx, msg, args)
 	case isCommand(cmd, "imposter"):
 		h.imposter.handleCommand(ctx, msg, "imposter")
 	case isCommand(cmd, "imposter_settings"):
@@ -72,7 +74,7 @@ func (h *Handler) HandleMessage(ctx context.Context, msg *models.Message) {
 	case isCommand(cmd, "word"):
 		h.imposter.handleWord(ctx, msg, args)
 	case msg.Chat.Type == models.ChatTypePrivate && findAudio(msg) != nil:
-		h.handleBPM(ctx, msg, "") // в личке музыка без команды — сразу гифка
+		h.handleAGIF(ctx, msg, "") // в личке музыка без команды — сразу гифка
 	default:
 		h.handlePassiveCheck(ctx, msg, messageCommandLine(msg))
 	}
@@ -88,9 +90,9 @@ func messageCommandLine(msg *models.Message) string {
 const helpMessage = `Команды
 /ytm <URL> [1:20-2:45] - аудио с YouTube, можно отрезок
 /ytv <URL> [1:20-2:45] - видео с YouTube, можно отрезок
-/bpm - ответом на музыку: гифка в такт (в личке достаточно прислать трек); /bpm <BPM> - под заданный BPM
-/agif [-c] [имя] - следующая гифка (или выбранная) под BPM предыдущей песни, а подписью к песне - под эту песню; -c - без поправки под Telegram Desktop; /agif_list - список гифок
+/agif [-c] [имя] [BPM] - гифка в такт: под заданный BPM, иначе под песню (ответом или подписью; в личке достаточно прислать трек), иначе под предыдущую песню; -c - без поправки под Telegram Desktop; /agif_list - список гифок
 /check <текст> - проверка текста
+/roll [мин-макс] - случайное число (по умолчанию 0-100)
 /imposter - игра "Импостер". Команды /imposter_settings, /imposter_stop, /word`
 
 func (h *Handler) handleHelp(ctx context.Context, msg *models.Message) {
@@ -104,6 +106,23 @@ func (h *Handler) handleStart(ctx context.Context, msg *models.Message) {
 		return
 	}
 	h.reply(ctx, msg, "Вы зарегистрированы для игры в \"Импостер\".\n\n"+imposterHelp)
+}
+
+func (h *Handler) handleRoll(ctx context.Context, msg *models.Message, args string) {
+	low, high := 0, 100
+	if args != "" {
+		lowText, highText, ok := strings.Cut(args, "-")
+		var err error
+		low, err = strconv.Atoi(strings.TrimSpace(lowText))
+		if ok && err == nil {
+			high, err = strconv.Atoi(strings.TrimSpace(highText))
+		}
+		if !ok || err != nil || low > high {
+			h.reply(ctx, msg, "Использование: /roll [мин-макс]")
+			return
+		}
+	}
+	h.reply(ctx, msg, strconv.Itoa(low+rand.IntN(high-low+1)))
 }
 
 func (h *Handler) handleCheck(ctx context.Context, msg *models.Message, text string) {

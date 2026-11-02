@@ -41,8 +41,17 @@ func (y *ytdlp) downloadAudio(ctx context.Context, pageURL string) (downloadResu
 		"--extract-audio", "--audio-format", "mp3", "--audio-quality", "192K")
 }
 
+// telegramVideoFormat выбирает лучшее качество, которое влезает в лимит загрузки Telegram (50 МБ),
+// и только если такого нет, берёт лучшее вообще (тогда бот отдаёт ссылку).
+const telegramVideoFormat = "bv*[filesize<40M]+ba[filesize<10M]/bv*[filesize_approx<40M]+ba[filesize_approx<10M]" +
+	"/b[filesize<50M]/b[filesize_approx<50M]/bestvideo+bestaudio/best"
+
 func (y *ytdlp) downloadVideo(ctx context.Context, pageURL string) (downloadResult, error) {
-	return y.download(ctx, pageURL, "bestvideo+bestaudio/best", "%(title)s [video].%(ext)s",
+	format := telegramVideoFormat
+	if strings.Contains(pageURL, " ") {
+		format = "bestvideo+bestaudio/best"
+	}
+	return y.download(ctx, pageURL, format, "%(title)s [video].%(ext)s",
 		"--merge-output-format", "mkv")
 }
 
