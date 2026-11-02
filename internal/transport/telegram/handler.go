@@ -92,7 +92,7 @@ const helpMessage = `Команды
 /ytv <URL> [1:20-2:45] - видео с YouTube, можно отрезок
 /agif [-c] [имя] [BPM] - гифка в такт: под заданный BPM, иначе под песню (ответом или подписью; в личке достаточно прислать трек), иначе под предыдущую песню; -c - без поправки под Telegram Desktop; /agif_list - список гифок
 /check <текст> - проверка текста
-/roll [мин-макс] - случайное число (по умолчанию 1-100)
+/roll [мин макс] - случайное число (по умолчанию 1-100)
 /imposter - игра "Импостер". Команды /imposter_settings, /imposter_stop, /word`
 
 func (h *Handler) handleHelp(ctx context.Context, msg *models.Message) {
@@ -109,20 +109,29 @@ func (h *Handler) handleStart(ctx context.Context, msg *models.Message) {
 }
 
 func (h *Handler) handleRoll(ctx context.Context, msg *models.Message, args string) {
-	low, high := 1, 100
+	var low, high int64 = 1, 100
 	if args != "" {
-		lowText, highText, ok := strings.Cut(args, "-")
-		var err error
-		low, err = strconv.Atoi(strings.TrimSpace(lowText))
-		if ok && err == nil {
-			high, err = strconv.Atoi(strings.TrimSpace(highText))
+		fields := strings.Fields(args)
+		if len(fields) != 2 {
+			h.reply(ctx, msg, "Использование: /roll [мин макс]")
+			return
 		}
-		if !ok || err != nil || low > high {
-			h.reply(ctx, msg, "Использование: /roll [мин-макс]")
+		var err error
+		low, err = strconv.ParseInt(fields[0], 10, 64)
+		if err == nil {
+			high, err = strconv.ParseInt(fields[1], 10, 64)
+		}
+		if err != nil || low >= high {
+			h.reply(ctx, msg, "Использование: /roll [мин макс]")
 			return
 		}
 	}
-	h.reply(ctx, msg, strconv.Itoa(low+rand.IntN(high-low+1)))
+	span := high - low + 1
+	if span <= 0 {
+		h.reply(ctx, msg, "Использование: /roll [мин макс]")
+		return
+	}
+	h.reply(ctx, msg, strconv.FormatInt(low+rand.Int64N(span), 10))
 }
 
 func (h *Handler) handleCheck(ctx context.Context, msg *models.Message, text string) {
