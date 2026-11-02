@@ -92,7 +92,7 @@ const helpMessage = `Команды
 /ytv <URL> [1:20-2:45] - видео с YouTube, можно отрезок
 /agif [-c] [имя] [BPM] - гифка в такт: под заданный BPM, иначе под песню (ответом или подписью; в личке достаточно прислать трек), иначе под предыдущую песню; -c - без поправки под Telegram Desktop; /agif_list - список гифок
 /check <текст> - проверка текста
-/roll [мин-макс] - случайное число (по умолчанию 0-100)
+/roll [мин-макс] - случайное число (по умолчанию 1-100)
 /imposter - игра "Импостер". Команды /imposter_settings, /imposter_stop, /word`
 
 func (h *Handler) handleHelp(ctx context.Context, msg *models.Message) {
@@ -109,7 +109,7 @@ func (h *Handler) handleStart(ctx context.Context, msg *models.Message) {
 }
 
 func (h *Handler) handleRoll(ctx context.Context, msg *models.Message, args string) {
-	low, high := 0, 100
+	low, high := 1, 100
 	if args != "" {
 		lowText, highText, ok := strings.Cut(args, "-")
 		var err error
